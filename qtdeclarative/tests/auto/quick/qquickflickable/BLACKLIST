@@ -1,0 +1,7 @@
+# QTBUG-26696
+[rebound]
+osx
+[stopAtBounds]
+windows developer-build
+[returnToBounds]
+osx
