@@ -49,6 +49,11 @@
 #include <QtQuick/private/qsgtexture_p.h>
 #include <QtCore/QRunnable>
 
+// zhoujun59761 >>>
+#include <private/qsgdefaultlayer_p.h>
+#include <QDateTime>
+// <<< zhoujun59761
+
 QT_BEGIN_NAMESPACE
 
 class QQuickShaderEffectSourceTextureProvider : public QSGTextureProvider
@@ -196,6 +201,10 @@ QQuickShaderEffectSource::QQuickShaderEffectSource(QQuickItem *parent)
     , m_recursive(false)
     , m_grab(true)
     , m_textureMirroring(MirrorVertically)
+    // zhoujun59761 >>>
+    , m_interval(0)
+    , m_lastGrab(0)
+    // <<< zhoujun59761
 {
     setFlag(ItemHasContents);
 }
@@ -620,6 +629,33 @@ void QQuickShaderEffectSource::setSamples(int count)
     emit samplesChanged();
 }
 
+// zhoujun59761 >>>
+
+int QQuickShaderEffectSource::interval() const
+{
+    return m_interval;
+}
+
+void QQuickShaderEffectSource::setInterval(int v)
+{
+    if (v != m_interval) {
+        m_interval = v;
+        emit intervalChanged();
+    }
+}
+
+qint64 QQuickShaderEffectSource::lastGrab() const
+{
+    return m_lastGrab;
+}
+
+const QImage &QQuickShaderEffectSource::material() const
+{
+    return m_material;
+}
+
+// <<< zhoujun59761
+
 /*!
     \qmlmethod QtQuick::ShaderEffectSource::scheduleUpdate()
 
@@ -769,6 +805,25 @@ QSGNode *QQuickShaderEffectSource::updatePaintNode(QSGNode *oldNode, UpdatePaint
     node->setTargetRect(QRectF(0, 0, width(), height()));
     node->setInnerTargetRect(QRectF(0, 0, width(), height()));
     node->update();
+
+    // zhoujun59761 >>>
+
+    if (m_interval >= 20) {
+        auto now = QDateTime::currentDateTime().toMSecsSinceEpoch();
+        if ((m_lastGrab + m_interval) < now) {
+            QSGDefaultLayer *layer = qobject_cast<QSGDefaultLayer *>(m_texture);
+            if (nullptr != layer) {
+                layer->grabImage(m_material);
+            } else {
+                m_material = m_texture->toImage();
+            }
+
+            m_lastGrab = now;
+            emit lastGrabChanged();
+        }
+    }
+
+    // <<< zhoujun59761
 
     return node;
 }

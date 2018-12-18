@@ -1412,6 +1412,115 @@ Q_GUI_EXPORT QImage qt_gl_read_framebuffer(const QSize &size, bool alpha_format,
     return qt_gl_read_framebuffer(size, alpha_format ? GL_RGBA : GL_RGB, include_alpha, true);
 }
 
+// zhoujun59761 >>>
+
+static inline void qt_flip_custom(QImage &image, bool flip)
+{
+    if (flip) {
+        qInfo("flip: not suggested.");
+        image = image.mirrored(false, true);
+    }
+}
+
+static inline bool qt_gl_read_framebuffer_rgba8_custom(QImage &image, const QSize &size, bool include_alpha, QOpenGLContext *context, bool flip)
+{
+    QOpenGLFunctions *funcs = context->functions();
+    const int w = size.width();
+    const int h = size.height();
+    bool isOpenGL12orBetter = !context->isOpenGLES() && (context->format().majorVersion() >= 2 || context->format().minorVersion() >= 2);
+    if (isOpenGL12orBetter) {
+        QImage::Format format = include_alpha ? QImage::Format_ARGB32_Premultiplied : QImage::Format_RGB32;
+        if ((image.size() != size) || (image.format() != format)) {
+            image = QImage(size, format);
+        }
+
+        funcs->glReadPixels(0, 0, w, h, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, image.bits());
+
+        qt_flip_custom(image, flip);
+        return true;
+    }
+
+    // For OpenGL ES stick with the byte ordered format / RGBA readback format
+    // since that is the only spec mandated way. (also, skip the
+    // GL_IMPLEMENTATION_COLOR_READ_FORMAT mess since there is nothing saying a
+    // BGRA capable impl would return BGRA from there)
+
+    QImage::Format format = include_alpha ? QImage::Format_RGBA8888_Premultiplied : QImage::Format_RGBX8888;
+    if ((image.size() != size) || (image.format() != format)) {
+        image = QImage(size, format);
+    }
+
+    funcs->glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, image.bits());
+
+    qt_flip_custom(image, flip);
+    return true;
+}
+
+static inline bool qt_gl_read_framebuffer_rgb10a2_custom(QImage &image, const QSize &size, bool include_alpha, QOpenGLContext *context, bool flip)
+{
+    QImage::Format format = include_alpha ? QImage::Format_A2BGR30_Premultiplied : QImage::Format_BGR30;
+    if ((image.size() != size) || (image.format() != format)) {
+        image = QImage(size, format);
+    }
+
+    // We assume OpenGL 1.2+ or ES 3.0+ here.
+    context->functions()->glReadPixels(0, 0, size.width(), size.height(), GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV, image.bits());
+
+    qt_flip_custom(image, flip);
+    return true;
+}
+
+static inline bool qt_gl_read_framebuffer_rgba16_custom(QImage &image, const QSize &size, bool include_alpha, QOpenGLContext *context, bool flip)
+{
+    QImage::Format format = include_alpha ? QImage::Format_RGBA64_Premultiplied : QImage::Format_RGBX64;
+    if ((image.size() != size) || (image.format() != format)) {
+        image = QImage(size, format);
+    }
+    // We assume OpenGL 1.2+ or ES 3.0+ here.
+    context->functions()->glReadPixels(0, 0, size.width(), size.height(), GL_RGBA, GL_UNSIGNED_SHORT, image.bits());
+
+    qt_flip_custom(image, flip);
+    return true;
+}
+
+static bool qt_gl_read_framebuffer_custom(QImage &image, const QSize &size, GLenum internal_format, bool include_alpha, bool flip)
+{
+    QOpenGLContext *ctx = QOpenGLContext::currentContext();
+    QOpenGLFunctions *funcs = ctx->functions();
+    while (true) {
+        GLenum error = funcs->glGetError();
+        if (error == GL_NO_ERROR || error == GL_CONTEXT_LOST)
+            break;
+    }
+    switch (internal_format) {
+    case GL_RGB:
+    case GL_RGB8:
+        return qt_gl_read_framebuffer_rgba8_custom(image, size, false, ctx, flip);
+    case GL_RGB16:
+        return qt_gl_read_framebuffer_rgba16_custom(image, size, false, ctx, flip);
+    case GL_RGB10:
+        return qt_gl_read_framebuffer_rgb10a2_custom(image, size, false, ctx, flip);
+    case GL_RGBA16:
+        return qt_gl_read_framebuffer_rgba16_custom(image, size, include_alpha, ctx, flip);
+    case GL_RGB10_A2:
+        return qt_gl_read_framebuffer_rgb10a2_custom(image, size, include_alpha, ctx, flip);
+    case GL_RGBA:
+    case GL_RGBA8:
+    default:
+        return qt_gl_read_framebuffer_rgba8_custom(image, size, include_alpha, ctx, flip);
+    }
+
+    Q_UNREACHABLE();
+    return false;
+}
+
+Q_GUI_EXPORT bool qt_gl_read_framebuffer_custom(QImage &image, const QSize &size, bool alpha_format, bool include_alpha)
+{
+    return qt_gl_read_framebuffer_custom(image, size, alpha_format ? GL_RGBA : GL_RGB, include_alpha, true);
+}
+
+// <<< zhoujun59761
+
 /*!
     \fn QImage QOpenGLFramebufferObject::toImage(bool flipped) const
 
@@ -1542,6 +1651,87 @@ QImage QOpenGLFramebufferObject::toImage(bool flipped, int colorAttachmentIndex)
 
     return image;
 }
+
+// zhoujun59761 >>>
+
+bool QOpenGLFramebufferObject::grabImage(QImage &image) const
+{
+    return grabImage(image, true, 0);
+}
+
+bool QOpenGLFramebufferObject::grabImage(QImage &image, bool flipped) const
+{
+    return grabImage(image, flipped, 0);
+}
+
+bool QOpenGLFramebufferObject::grabImage(QImage &image, bool flipped, int colorAttachmentIndex) const
+{
+    Q_D(const QOpenGLFramebufferObject);
+    if (!d->valid)
+        return false;
+
+    QOpenGLContext *ctx = QOpenGLContext::currentContext();
+    if (!ctx) {
+        qWarning("QOpenGLFramebufferObject::toImage() called without a current context");
+        return false;
+    }
+
+    if (d->colorAttachments.count() <= colorAttachmentIndex) {
+        qWarning("QOpenGLFramebufferObject::toImage() called for missing color attachment");
+        return false;
+    }
+
+    if (image.size() != size()) {
+        image = QImage(size(), QImage::Format_ARGB32);
+    }
+
+    GLuint prevFbo = 0;
+    ctx->functions()->glGetIntegerv(GL_FRAMEBUFFER_BINDING, (GLint *) &prevFbo);
+
+    if (prevFbo != d->fbo())
+        const_cast<QOpenGLFramebufferObject *>(this)->bind();
+
+    QOpenGLExtraFunctions *extraFuncs = ctx->extraFunctions();
+    // qt_gl_read_framebuffer doesn't work on a multisample FBO
+    if (format().samples() != 0) {
+        QRect rect(QPoint(0, 0), size());
+        QOpenGLFramebufferObjectFormat fmt;
+        if (extraFuncs->hasOpenGLFeature(QOpenGLFunctions::MultipleRenderTargets)) {
+            fmt.setInternalTextureFormat(d->colorAttachments[colorAttachmentIndex].internalFormat);
+            QOpenGLFramebufferObject temp(d->colorAttachments[colorAttachmentIndex].size, fmt);
+            blitFramebuffer(&temp, rect, const_cast<QOpenGLFramebufferObject *>(this), rect,
+                            GL_COLOR_BUFFER_BIT, GL_NEAREST,
+                            colorAttachmentIndex, 0);
+            qInfo("ugly way, not suggested.");
+            temp.grabImage(image, flipped);
+        } else {
+            fmt.setInternalTextureFormat(d->colorAttachments[0].internalFormat);
+            QOpenGLFramebufferObject temp(size(), fmt);
+            blitFramebuffer(&temp, rect, const_cast<QOpenGLFramebufferObject *>(this), rect);
+            qInfo("ugly way, not suggested.");
+            temp.grabImage(image, flipped);
+        }
+    } else {
+        if (extraFuncs->hasOpenGLFeature(QOpenGLFunctions::MultipleRenderTargets)) {
+            extraFuncs->glReadBuffer(GL_COLOR_ATTACHMENT0 + colorAttachmentIndex);
+            qt_gl_read_framebuffer_custom(image, d->colorAttachments[colorAttachmentIndex].size,
+                                           d->colorAttachments[colorAttachmentIndex].internalFormat,
+                                           true, flipped);
+            extraFuncs->glReadBuffer(GL_COLOR_ATTACHMENT0);
+        } else {
+            qt_gl_read_framebuffer_custom(image, d->colorAttachments[0].size,
+                    d->colorAttachments[0].internalFormat,
+                    true, flipped);
+        }
+    }
+
+    if (prevFbo != d->fbo())
+        ctx->functions()->glBindFramebuffer(GL_FRAMEBUFFER, prevFbo);
+
+    return true;
+}
+
+// <<< zhoujun59761
 
 /*!
     \fn bool QOpenGLFramebufferObject::bindDefault()

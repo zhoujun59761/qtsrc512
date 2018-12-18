@@ -120,6 +120,12 @@ public Q_SLOTS:
     void markDirtyTexture() override;
     void invalidated() override;
 
+    // zhoujun59761 >>>
+
+    bool grabImage(QImage &image) const;
+
+    // <<< zhoujun59761
+
 private:
     void grab();
 

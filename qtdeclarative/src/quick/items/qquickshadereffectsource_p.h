@@ -90,6 +90,13 @@ class Q_QUICK_PRIVATE_EXPORT QQuickShaderEffectSource : public QQuickItem, publi
     Q_PROPERTY(TextureMirroring textureMirroring READ textureMirroring WRITE setTextureMirroring NOTIFY textureMirroringChanged REVISION 1)
     Q_PROPERTY(int samples READ samples WRITE setSamples NOTIFY samplesChanged REVISION 2)
 
+    // zhoujun59761 >>>
+
+    Q_PROPERTY(int interval READ interval WRITE setInterval NOTIFY intervalChanged)
+    Q_PROPERTY(qint64 lastGrab READ lastGrab NOTIFY lastGrabChanged)
+
+    // <<< zhoujun59761
+
 public:
     enum WrapMode {
         ClampToEdge,
@@ -154,6 +161,15 @@ public:
     int samples() const;
     void setSamples(int count);
 
+    // zhoujun59761 >>>
+
+    int interval() const;
+    void setInterval(int v);
+    qint64 lastGrab() const;
+    const QImage &material() const;
+
+    // <<< zhoujun59761
+
 Q_SIGNALS:
     void wrapModeChanged();
     void sourceItemChanged();
@@ -168,6 +184,13 @@ Q_SIGNALS:
     void samplesChanged();
 
     void scheduledUpdateCompleted();
+
+    // zhoujun59761 >>>
+
+    void intervalChanged();
+    void lastGrabChanged();
+
+    // <<< zhoujun59761
 
 private Q_SLOTS:
     void sourceItemDestroyed(QObject *item);
@@ -197,6 +220,14 @@ private:
     uint m_recursive : 1;
     uint m_grab : 1;
     uint m_textureMirroring : 2; // Stores TextureMirroring enum
+
+    // zhoujun59761 >>>
+
+    int    m_interval;
+    qint64 m_lastGrab;
+    QImage m_material;
+
+    // <<< zhoujun59761
 };
 
 QT_END_NAMESPACE

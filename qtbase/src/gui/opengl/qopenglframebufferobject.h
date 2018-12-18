@@ -113,6 +113,11 @@ public:
     QImage toImage() const;
     QImage toImage(bool flipped) const;
     QImage toImage(bool flipped, int colorAttachmentIndex) const;
+    // zhoujun59761 >>>
+    bool grabImage(QImage &image) const;
+    bool grabImage(QImage &image, bool flipped) const;
+    bool grabImage(QImage &image, bool flipped, int colorAttachmentIndex) const;
+    // <<< zhoujun59761
 
     Attachment attachment() const;
     void setAttachment(Attachment attachment);

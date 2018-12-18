@@ -136,6 +136,19 @@ void QSGDefaultLayer::invalidated()
     }
 }
 
+// zhoujun59761 >>>
+
+bool QSGDefaultLayer::grabImage(QImage &image) const
+{
+    if (m_fbo) {
+        return m_fbo->grabImage(image, false);
+    }
+
+    return false;
+}
+
+// <<< zhoujun59761
+
 int QSGDefaultLayer::textureId() const
 {
     return m_fbo ? m_fbo->texture() : 0;
