@@ -434,18 +434,20 @@ const InstructionId *QScxmlExecutionEngine::step(const InstructionId *ip, bool *
         qCDebug(qscxmlLog) << stateMachine << "Executing log step";
         const Log *log = reinterpret_cast<const Log *>(instr);
         ip += log->size();
+        QString str;
         if (log->expr != NoEvaluator) {
-            const QString str = dataModel->evaluateToString(log->expr, ok);
-            if (*ok) {
-                const QString label = tableData->string(log->label);
-                qCDebug(scxmlLog) << label << ":" << str;
-                QMetaObject::invokeMethod(stateMachine,
-                                          "log",
-                                          Qt::QueuedConnection,
-                                          Q_ARG(QString, label),
-                                          Q_ARG(QString, str));
-            }
+            str = dataModel->evaluateToString(log->expr, ok);
+            if (!*ok)
+                qCWarning(qscxmlLog) << stateMachine << "Could not evaluate <log> expr to string.";
         }
+
+        const QString label = tableData->string(log->label);
+        qCDebug(scxmlLog) << label << ":" << str;
+        QMetaObject::invokeMethod(stateMachine,
+                                  "log",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(QString, label),
+                                  Q_ARG(QString, str));
         return ip;
     }
 

@@ -2723,10 +2723,6 @@ void QQmlTypeData::resolveTypes()
         }
     }
 
-    std::stable_sort(m_compositeSingletons.begin(), m_compositeSingletons.end(), [](const TypeReference &lhs, const TypeReference &rhs){
-        return lhs.qualifiedName() < rhs.qualifiedName();
-    });
-
     for (QV4::CompiledData::TypeReferenceMap::ConstIterator unresolvedRef = m_typeReferences.constBegin(), end = m_typeReferences.constEnd();
          unresolvedRef != end; ++unresolvedRef) {
 
@@ -3289,14 +3285,7 @@ QDateTime QQmlDataBlob::SourceCodeData::sourceTimeStamp() const
     if (hasInlineSourceCode)
         return QDateTime();
 
-    QDateTime timeStamp = fileInfo.lastModified();
-    if (timeStamp.isValid())
-        return timeStamp;
-
-    static QDateTime appTimeStamp;
-    if (!appTimeStamp.isValid())
-        appTimeStamp = QFileInfo(QCoreApplication::applicationFilePath()).lastModified();
-    return appTimeStamp;
+    return fileInfo.lastModified();
 }
 
 bool QQmlDataBlob::SourceCodeData::exists() const

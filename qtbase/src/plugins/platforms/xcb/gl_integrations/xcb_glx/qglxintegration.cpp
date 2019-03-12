@@ -38,9 +38,6 @@
 ****************************************************************************/
 
 #include <QDebug>
-#if QT_CONFIG(library)
-#include <QLibrary>
-#endif
 
 #include "qxcbwindow.h"
 #include "qxcbscreen.h"
@@ -51,6 +48,7 @@
 #undef register
 #include <GL/glx.h>
 
+#include <QtCore/QRegularExpression>
 #include <QtGui/QOpenGLContext>
 #include <QtGui/QOffscreenSurface>
 
@@ -59,10 +57,6 @@
 #include <QtPlatformHeaders/QGLXNativeContext>
 
 #include "qxcbglintegration.h"
-
-#if !defined(QT_STATIC) && QT_CONFIG(dlopen)
-#include <dlfcn.h>
-#endif
 
 QT_BEGIN_NAMESPACE
 
@@ -626,43 +620,7 @@ void QGLXContext::swapBuffers(QPlatformSurface *surface)
 
 QFunctionPointer QGLXContext::getProcAddress(const char *procName)
 {
-#ifdef QT_STATIC
-    return glXGetProcAddressARB(reinterpret_cast<const GLubyte *>(procName));
-#else
-    typedef void *(*qt_glXGetProcAddressARB)(const GLubyte *);
-    static qt_glXGetProcAddressARB glXGetProcAddressARB = 0;
-    static bool resolved = false;
-
-    if (resolved && !glXGetProcAddressARB)
-        return 0;
-    if (!glXGetProcAddressARB) {
-        QList<QByteArray> glxExt = QByteArray(glXGetClientString(m_display, GLX_EXTENSIONS)).split(' ');
-        if (glxExt.contains("GLX_ARB_get_proc_address")) {
-#if QT_CONFIG(dlopen)
-            void *handle = dlopen(NULL, RTLD_LAZY);
-            if (handle) {
-                glXGetProcAddressARB = (qt_glXGetProcAddressARB) dlsym(handle, "glXGetProcAddressARB");
-                dlclose(handle);
-            }
-            if (!glXGetProcAddressARB)
-#endif
-            {
-#if QT_CONFIG(library)
-                extern const QString qt_gl_library_name();
-//                QLibrary lib(qt_gl_library_name());
-                QLibrary lib(QLatin1String("GL"));
-                if (!lib.load())
-                    lib.setFileNameAndVersion(QLatin1String("GL"), 1);
-                glXGetProcAddressARB = (qt_glXGetProcAddressARB) lib.resolve("glXGetProcAddressARB");
-#endif
-            }
-        }
-        resolved = true;
-    }
-    if (!glXGetProcAddressARB)
-        return 0;
-    return (void (*)())glXGetProcAddressARB(reinterpret_cast<const GLubyte *>(procName));
-#endif
+    return glXGetProcAddress(reinterpret_cast<const GLubyte *>(procName));
 }
 
 QSurfaceFormat QGLXContext::format() const
@@ -689,32 +647,6 @@ bool QGLXContext::m_supportsThreading = true;
 // binary search.
 static const char *qglx_threadedgl_blacklist_renderer[] = {
     "Chromium",                             // QTBUG-32225 (initialization fails)
-    0
-};
-
-// This disables threaded rendering on anything using mesa, e.g.
-// - nvidia/nouveau
-// - amd/gallium
-// - intel
-// - some software opengl implementations
-//
-// The client glx vendor string is used to identify those setups as that seems to show the least
-// variance between the bad configurations. It's always "Mesa Project and SGI". There are some
-// configurations which don't use mesa and which can do threaded rendering (amd and nvidia chips
-// with their own proprietary drivers).
-//
-// This, of course, is very broad and disables threaded rendering on a lot of devices which would
-// be able to use it. However, the bugs listed below don't follow any easily recognizable pattern
-// and we should rather be safe.
-//
-// http://cgit.freedesktop.org/xcb/libxcb/commit/?id=be0fe56c3bcad5124dcc6c47a2fad01acd16f71a will
-// fix some of the issues. Basically, the proprietary drivers seem to have a way of working around
-// a fundamental flaw with multithreaded access to xcb, but mesa doesn't. The blacklist should be
-// reevaluated once that patch is released in some version of xcb.
-static const char *qglx_threadedgl_blacklist_vendor[] = {
-    "Mesa Project and SGI",                // QTCREATORBUG-10875 (crash in creator)
-                                           // QTBUG-34492 (flickering in fullscreen)
-                                           // QTBUG-38221
     0
 };
 
@@ -777,17 +709,32 @@ void QGLXContext::queryDummyContext()
         }
     }
 
-    if (glxvendor) {
-        for (int i = 0; qglx_threadedgl_blacklist_vendor[i]; ++i) {
-            if (strstr(glxvendor, qglx_threadedgl_blacklist_vendor[i]) != 0) {
-                qCDebug(lcQpaGl).nospace() << "Multithreaded OpenGL disabled: "
-                                             "blacklisted vendor \""
-                                          << qglx_threadedgl_blacklist_vendor[i]
-                                          << "\"";
+    if (glxvendor && m_supportsThreading) {
+        // Blacklist Mesa drivers due to QTCREATORBUG-10875 (crash in creator),
+        // QTBUG-34492 (flickering in fullscreen) and QTBUG-38221
+        const char *mesaVersionStr = nullptr;
+        if (strstr(glxvendor, "Mesa Project") != 0) {
+            mesaVersionStr = (const char *) glGetString(GL_VERSION);
+            m_supportsThreading = false;
+        }
 
-                m_supportsThreading = false;
-                break;
+        if (mesaVersionStr) {
+            // The issue was fixed in Xcb 1.11, but we can't check for that
+            // at runtime, so instead assume it fixed with recent Mesa versions
+            // released several years after the Xcb fix.
+            QRegularExpression versionTest(QStringLiteral("Mesa (\\d+)"));
+            QRegularExpressionMatch result = versionTest.match(QString::fromLatin1(mesaVersionStr));
+            int versionNr = 0;
+            if (result.hasMatch())
+                versionNr = result.captured(1).toInt();
+            if (versionNr >= 17) {
+                // White-listed
+                m_supportsThreading = true;
             }
+        }
+        if (!m_supportsThreading) {
+            qCDebug(lcQpaGl).nospace() << "Multithreaded OpenGL disabled: "
+                                          "blacklisted vendor \"Mesa Project\"";
         }
     }
 

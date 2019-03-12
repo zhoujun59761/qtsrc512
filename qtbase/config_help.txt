@@ -17,7 +17,8 @@ quoting and double quotes for the outer quoting.
 
 Top-level installation directories:
   -prefix <dir> ...... The deployment directory, as seen on the target device.
-                       [/usr/local/Qt-$QT_VERSION, $PWD if -developer-build]
+                       [/usr/local/Qt-$QT_VERSION; qtbase build directory if
+                       -developer-build]
   -extprefix <dir> ... The installation directory, as seen on the host machine.
                        [SYSROOT/PREFIX]
   -hostprefix [dir] .. The installation directory for build tools running on
@@ -213,7 +214,8 @@ Component selection:
                          [libs and examples, also tools if not cross-building,
                          also tests if -developer-build]
   -nomake <part> ....... Exclude <part> from the list of parts to be built.
-  -compile-examples .... When unset, install only the sources of examples [yes]
+  -compile-examples .... When unset, install only the sources of examples
+                         [no on WebAssembly, otherwise yes]
   -gui ................. Build the Qt GUI module and dependencies [yes]
   -widgets ............. Build the Qt Widgets module and dependencies [yes]
   -no-dbus ............. Do not build the Qt D-Bus module
@@ -291,7 +293,7 @@ Gui, printing, widget options:
     -kms ............... Enable backends for KMS [auto] (Linux only)
     -linuxfb ........... Enable Linux Framebuffer support [auto] (Linux only)
     -mirclient ......... Enable Mir client support [no] (Linux only)
-    -xcb ............... Select used xcb-* libraries [system/qt/no]
+    -xcb ............... Enable X11 support. Select used xcb-* libraries [system/qt/no]
                          (-qt-xcb still uses system version of libxcb itself)
 
   Input backends:
@@ -302,10 +304,7 @@ Gui, printing, widget options:
     -mtdev ............. Enable mtdev support [auto]
     -tslib ............. Enable tslib support [auto]
     -xcb-xinput ........ Enable XInput2 support [auto]
-    -xkbcommon-x11 ..... Select xkbcommon used in combination with xcb
-                         [system/qt/no]
-    -xkbcommon-evdev ... Enable X-less xkbcommon in combination with libinput
-                         [auto]
+    -xkbcommon ......... Enable key mapping support [auto]
 
   Image formats:
     -gif ............... Enable reading support for GIF [auto]

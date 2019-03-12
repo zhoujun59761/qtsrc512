@@ -152,6 +152,9 @@ bool QHelpCollectionHandler::openCollectionFile()
         }
     }
 
+    if (m_readOnly)
+        return true;
+
     m_query->exec(QLatin1String("PRAGMA synchronous=OFF"));
     m_query->exec(QLatin1String("PRAGMA cache_size=3000"));
 
@@ -195,8 +198,10 @@ bool QHelpCollectionHandler::openCollectionFile()
     const FileInfoList &docList = registeredDocumentations();
     if (indexAndNamespaceFilterTablesMissing) {
         for (const QHelpCollectionHandler::FileInfo &info : docList) {
-            if (!registerIndexAndNamespaceFilterTables(info.namespaceName))
+            if (!registerIndexAndNamespaceFilterTables(info.namespaceName)) {
+                emit error(tr("Cannot register index tables in file %1.").arg(collectionFile()));
                 return false;
+            }
         }
         return true;
     }
@@ -224,8 +229,10 @@ bool QHelpCollectionHandler::openCollectionFile()
     // In this case we remove all records from tables.
     Transaction transaction(m_connectionName);
     for (const TimeStamp &timeStamp : toRemove) {
-        if (!unregisterIndexTable(timeStamp.namespaceId, timeStamp.folderId))
+        if (!unregisterIndexTable(timeStamp.namespaceId, timeStamp.folderId)) {
+            emit error(tr("Cannot unregister index tables in file %1.").arg(collectionFile()));
             return false;
+        }
     }
     transaction.commit();
 
@@ -1764,6 +1771,11 @@ QMap<QString, QUrl> QHelpCollectionHandler::linksForField(const QString &fieldNa
                                              m_query->value(4).toString()));
     }
     return linkMap;
+}
+
+void QHelpCollectionHandler::setReadOnly(bool readOnly)
+{
+    m_readOnly = readOnly;
 }
 
 QT_END_NAMESPACE

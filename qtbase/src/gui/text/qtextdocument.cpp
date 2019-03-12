@@ -51,7 +51,9 @@
 #include <qregularexpression.h>
 #endif
 #include <qvarlengtharray.h>
+#if QT_CONFIG(textcodec)
 #include <qtextcodec.h>
+#endif
 #include <qthread.h>
 #include <qcoreapplication.h>
 #include <qmetaobject.h>
@@ -209,7 +211,7 @@ QString Qt::convertFromPlainText(const QString &plain, Qt::WhiteSpaceMode mode)
 
     This function is defined in the \c <QTextDocument> header file.
 */
-#ifndef QT_NO_TEXTCODEC
+#if QT_CONFIG(textcodec)
 QTextCodec *Qt::codecForHtml(const QByteArray &ba)
 {
     return QTextCodec::codecForHtml(ba);
@@ -1910,7 +1912,7 @@ static void printPage(int index, QPainter *painter, const QTextDocument *doc, co
 }
 
 /*!
-    Prints the document to the given \a printer. The QPageablePaintDevice must be
+    Prints the document to the given \a printer. The QPagedPaintDevice must be
     set up before being used with this function.
 
     This is only a convenience method to print the whole document to the printer.

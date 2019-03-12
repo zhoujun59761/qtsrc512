@@ -53,6 +53,8 @@
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
+#include "content/common/content_switches_internal.h"
+#include "content/browser/renderer_host/render_widget_host_input_event_router.h"
 #include "content/common/cursors/webcursor.h"
 #include "content/common/input_messages.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -260,7 +262,7 @@ RenderWidgetHostViewQt::RenderWidgetHostViewQt(content::RenderWidgetHost *widget
     , m_gestureProvider(QtGestureProviderConfig(), this)
     , m_sendMotionActionDown(false)
     , m_touchMotionStarted(false)
-    , m_compositor(new Compositor)
+    , m_compositor(new Compositor(this))
     , m_loadVisuallyCommittedState(NotCommitted)
     , m_adapterClient(0)
     , m_imeInProgress(false)
@@ -273,6 +275,9 @@ RenderWidgetHostViewQt::RenderWidgetHostViewQt(content::RenderWidgetHost *widget
     , m_wheelAckPending(false)
     , m_pendingResize(false)
     , m_mouseWheelPhaseHandler(this)
+    // This frame-sink id is based on what RenderWidgetHostViewChildFrame does:
+    , m_frameSinkId(base::checked_cast<uint32_t>(widget->GetProcess()->GetID()),
+                    base::checked_cast<uint32_t>(widget->GetRoutingID()))
 {
     host()->SetView(this);
 #ifndef QT_NO_ACCESSIBILITY
@@ -290,6 +295,9 @@ RenderWidgetHostViewQt::RenderWidgetHostViewQt(content::RenderWidgetHost *widget
     m_imeHasHiddenTextCapability = context && context->hasCapability(QPlatformInputContext::HiddenTextCapability);
 
     m_localSurfaceId = m_localSurfaceIdAllocator.GenerateId();
+
+    if (host()->delegate() && host()->delegate()->GetInputEventRouter())
+        host()->delegate()->GetInputEventRouter()->AddFrameSinkIdOwner(GetFrameSinkId(), this);
 }
 
 RenderWidgetHostViewQt::~RenderWidgetHostViewQt()
@@ -403,7 +411,18 @@ bool RenderWidgetHostViewQt::HasFocus() const
 
 bool RenderWidgetHostViewQt::IsSurfaceAvailableForCopy() const
 {
-    return false;
+    return true;
+}
+
+void RenderWidgetHostViewQt::CopyFromSurface(const gfx::Rect &src_rect,
+                                             const gfx::Size &output_size,
+                                             base::OnceCallback<void(const SkBitmap &)> callback)
+{
+    QImage image;
+    if (m_delegate->copySurface(toQt(src_rect), toQt(output_size), image))
+        std::move(callback).Run(toSkBitmap(image));
+    else
+        std::move(callback).Run(SkBitmap());
 }
 
 void RenderWidgetHostViewQt::Show()
@@ -727,24 +746,28 @@ void RenderWidgetHostViewQt::OnUpdateTextInputStateCalled(content::TextInputMana
     Q_UNUSED(updated_view);
     Q_UNUSED(did_update_state);
 
-    ui::TextInputType type = getTextInputType();
-    m_delegate->inputMethodStateChanged(type != ui::TEXT_INPUT_TYPE_NONE, type == ui::TEXT_INPUT_TYPE_PASSWORD);
-    m_delegate->setInputMethodHints(toQtInputMethodHints(type));
-
     const content::TextInputState *state = text_input_manager_->GetTextInputState();
-    if (!state)
+    if (!state) {
+        m_delegate->inputMethodStateChanged(false /*editorVisible*/, false /*passwordInput*/);
+        m_delegate->setInputMethodHints(Qt::ImhNone);
         return;
+    }
 
-    // At this point it is unknown whether the text input state has been updated due to a text selection.
-    // Keep the cursor position updated for cursor movements too.
-    if (GetSelectedText().empty())
-        m_cursorPosition = state->selection_start;
+    ui::TextInputType type = getTextInputType();
+    m_delegate->setInputMethodHints(toQtInputMethodHints(getTextInputType()) | Qt::ImhNoPredictiveText | Qt::ImhNoTextHandles | Qt::ImhNoEditMenu);
 
     m_surroundingText = QString::fromStdString(state->value);
-
     // Remove IME composition text from the surrounding text
     if (state->composition_start != -1 && state->composition_end != -1)
         m_surroundingText.remove(state->composition_start, state->composition_end - state->composition_start);
+
+    // In case of text selection, the update is expected in RenderWidgetHostViewQt::selectionChanged().
+    if (GetSelectedText().empty()) {
+        // At this point it is unknown whether the text input state has been updated due to a text selection.
+        // Keep the cursor position updated for cursor movements too.
+        m_cursorPosition = state->selection_start;
+        m_delegate->inputMethodStateChanged(type != ui::TEXT_INPUT_TYPE_NONE, type == ui::TEXT_INPUT_TYPE_PASSWORD);
+    }
 
     if (m_imState & ImStateFlags::TextInputStateUpdated) {
         m_imState = ImStateFlags::TextInputStateUpdated;
@@ -802,9 +825,10 @@ void RenderWidgetHostViewQt::selectionChanged()
 {
     // Reset input manager state
     m_imState = 0;
+    ui::TextInputType type = getTextInputType();
 
     // Handle text selection out of an input field
-    if (getTextInputType() == ui::TEXT_INPUT_TYPE_NONE) {
+    if (type == ui::TEXT_INPUT_TYPE_NONE) {
         if (GetSelectedText().empty() && m_emptyPreviousSelection)
             return;
 
@@ -824,12 +848,13 @@ void RenderWidgetHostViewQt::selectionChanged()
         // if the selection is cleared because TextInputState changes before the TextSelection change.
         Q_ASSERT(text_input_manager_->GetTextInputState());
         m_cursorPosition = text_input_manager_->GetTextInputState()->selection_start;
+        m_delegate->inputMethodStateChanged(true /*editorVisible*/, type == ui::TEXT_INPUT_TYPE_PASSWORD);
 
         m_anchorPositionWithinSelection = m_cursorPosition;
         m_cursorPositionWithinSelection = m_cursorPosition;
 
         if (!m_emptyPreviousSelection) {
-            m_emptyPreviousSelection = GetSelectedText().empty();
+            m_emptyPreviousSelection = true;
             m_adapterClient->selectionChanged();
         }
 
@@ -864,11 +889,19 @@ void RenderWidgetHostViewQt::selectionChanged()
         m_cursorPosition = newCursorPositionWithinSelection;
 
     m_emptyPreviousSelection = selection->selected_text().empty();
+    m_delegate->inputMethodStateChanged(true /*editorVisible*/, type == ui::TEXT_INPUT_TYPE_PASSWORD);
     m_adapterClient->selectionChanged();
 }
 
 void RenderWidgetHostViewQt::OnGestureEvent(const ui::GestureEventData& gesture)
 {
+    if ((gesture.type() == ui::ET_GESTURE_PINCH_BEGIN
+         || gesture.type() == ui::ET_GESTURE_PINCH_UPDATE
+         || gesture.type() == ui::ET_GESTURE_PINCH_END)
+        && !content::IsPinchToZoomEnabled()) {
+        return;
+    }
+
     host()->ForwardGestureEvent(ui::CreateWebGestureEventFromGestureEventData(gesture));
 }
 
@@ -1079,7 +1112,7 @@ QVariant RenderWidgetHostViewQt::inputMethodQuery(Qt::InputMethodQuery query)
         // TODO: Implement this
         return QVariant(); // No limit.
     case Qt::ImHints:
-        return int(toQtInputMethodHints(getTextInputType()));
+        return int(toQtInputMethodHints(getTextInputType()) | Qt::ImhNoPredictiveText | Qt::ImhNoTextHandles | Qt::ImhNoEditMenu);
     default:
         return QVariant();
     }
@@ -1290,14 +1323,9 @@ void RenderWidgetHostViewQt::handleInputMethodEvent(QInputMethodEvent *ev)
 
     if (replacementLength > 0)
     {
-        int start = ev->replacementStart();
-
-        if (start >= 0)
-            replacementRange = gfx::Range(start, start + replacementLength);
-        else if (m_surroundingText.length() + start >= 0) {
-            start = m_surroundingText.length() + start;
-            replacementRange = gfx::Range(start, start + replacementLength);
-        }
+        int replacementStart = ev->replacementStart() < 0 ? m_cursorPosition + ev->replacementStart() : ev->replacementStart();
+        if (replacementStart >= 0 && replacementStart < m_surroundingText.length())
+            replacementRange = gfx::Range(replacementStart, replacementStart + replacementLength);
     }
 
     // There are so-far two known cases, when an empty QInputMethodEvent is received.
@@ -1626,6 +1654,11 @@ void RenderWidgetHostViewQt::SetNeedsBeginFrames(bool needs_begin_frames)
     m_compositor->setNeedsBeginFrames(needs_begin_frames);
 }
 
+void RenderWidgetHostViewQt::OnBeginFrame(base::TimeTicks frame_time)
+{
+    host()->ProgressFlingIfNeeded(frame_time);
+}
+
 content::RenderFrameHost *RenderWidgetHostViewQt::getFocusedFrameHost()
 {
     content::RenderViewHostImpl *viewHost = content::RenderViewHostImpl::From(host());
@@ -1658,7 +1691,7 @@ viz::SurfaceId RenderWidgetHostViewQt::GetCurrentSurfaceId() const
 
 const viz::FrameSinkId &RenderWidgetHostViewQt::GetFrameSinkId() const
 {
-    return viz::FrameSinkIdAllocator::InvalidFrameSinkId();
+    return m_frameSinkId;
 }
 
 const viz::LocalSurfaceId &RenderWidgetHostViewQt::GetLocalSurfaceId() const

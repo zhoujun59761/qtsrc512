@@ -35,6 +35,7 @@
 #include <QtQuick/qquickitem.h>
 #include "../../shared/util.h"
 #include <QtGui/QWindow>
+#include <QtGui/QScreen>
 #include <QtGui/QImage>
 #include <QtCore/QDebug>
 #include <QtQml/qqmlengine.h>
@@ -144,6 +145,7 @@ private slots:
 
 private:
     QTouchDevice *device = QTest::createTouchDevice();
+    const QRect m_availableGeometry = QGuiApplication::primaryScreen()->availableGeometry();
 };
 
 tst_qquickwidget::tst_qquickwidget()
@@ -158,7 +160,7 @@ void tst_qquickwidget::showHide()
     childView->setSource(testFileUrl("rectangle.qml"));
 
     window.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&window, 5000));
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
     QVERIFY(childView->quickWindow()->isVisible());
     QVERIFY(childView->quickWindow()->visibility() != QWindow::Hidden);
 
@@ -174,13 +176,13 @@ void tst_qquickwidget::reparentAfterShow()
     QQuickWidget *childView = new QQuickWidget(&window);
     childView->setSource(testFileUrl("rectangle.qml"));
     window.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&window, 5000));
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
 
     QScopedPointer<QQuickWidget> toplevelView(new QQuickWidget);
     toplevelView->setParent(&window);
     toplevelView->setSource(testFileUrl("rectangle.qml"));
     toplevelView->show();
-    QVERIFY(QTest::qWaitForWindowExposed(&window, 5000));
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
 }
 
 void tst_qquickwidget::changeGeometry()
@@ -191,7 +193,7 @@ void tst_qquickwidget::changeGeometry()
     childView->setSource(testFileUrl("rectangle.qml"));
 
     window.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&window, 5000));
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
 
     childView->setGeometry(100,100,100,100);
 }
@@ -199,7 +201,7 @@ void tst_qquickwidget::changeGeometry()
 void tst_qquickwidget::resizemodeitem()
 {
     QWidget window;
-    window.setGeometry(0, 0, 400, 400);
+    window.setGeometry(m_availableGeometry.left(), m_availableGeometry.top(), 400, 400);
 
     QScopedPointer<QQuickWidget> view(new QQuickWidget);
     view->setParent(&window);
@@ -371,7 +373,7 @@ void tst_qquickwidget::readback()
     view->setSource(testFileUrl("rectangle.qml"));
 
     view->show();
-    QVERIFY(QTest::qWaitForWindowExposed(view.data(), 5000));
+    QVERIFY(QTest::qWaitForWindowExposed(view.data()));
 
     QImage img = view->grabFramebuffer();
     QVERIFY(!img.isNull());
@@ -407,7 +409,7 @@ void tst_qquickwidget::renderingSignals()
     QCOMPARE(afterRenderingSpy.size(), 0);
 
     widget.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&widget, 5000));
+    QVERIFY(QTest::qWaitForWindowExposed(&widget));
 
     QTRY_VERIFY(beforeRenderingSpy.size() > 0);
     QTRY_VERIFY(beforeSyncSpy.size() > 0);
@@ -439,9 +441,9 @@ void tst_qquickwidget::reparentToNewWindow()
     QQuickWidget *qqw = new QQuickWidget(&window1);
     qqw->setSource(testFileUrl("rectangle.qml"));
     window1.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&window1, 5000));
+    QVERIFY(QTest::qWaitForWindowExposed(&window1));
     window2.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&window2, 5000));
+    QVERIFY(QTest::qWaitForWindowExposed(&window2));
 
     QSignalSpy afterRenderingSpy(qqw->quickWindow(), &QQuickWindow::afterRendering);
     qqw->setParent(&window2);
@@ -486,7 +488,7 @@ void tst_qquickwidget::keyEvents()
     KeyHandlingWidget widget;
     widget.setSource(testFileUrl("rectangle.qml"));
     widget.show();
-    QVERIFY(QTest::qWaitForWindowExposed(widget.window(), 5000));
+    QVERIFY(QTest::qWaitForWindowExposed(widget.window()));
 
     // Note: send the event to the QWindow, not the QWidget, in order
     // to simulate the full event processing chain.
@@ -514,7 +516,7 @@ void tst_qquickwidget::shortcuts()
     KeyHandlingWidget widget;
     widget.setSource(testFileUrl("rectangle.qml"));
     widget.show();
-    QVERIFY(QTest::qWaitForWindowExposed(widget.window(), 5000));
+    QVERIFY(QTest::qWaitForWindowExposed(widget.window()));
 
     // Send to the widget, verify that the QQuickWindow sees it.
 
@@ -532,22 +534,24 @@ void tst_qquickwidget::enterLeave()
     QQuickWidget view;
     view.setSource(testFileUrl("enterleave.qml"));
 
-    // Ensure it is not inside the window first
-    QCursor::setPos(QPoint(50, 50));
-    QTRY_VERIFY(QCursor::pos() == QPoint(50, 50));
+    // Ensure the cursor is away from the window first
+    const auto outside = m_availableGeometry.topLeft() + QPoint(50, 50);
+    QCursor::setPos(outside);
+    QTRY_VERIFY(QCursor::pos() == outside);
 
-    view.move(100, 100);
+    view.move(m_availableGeometry.topLeft() + QPoint(100, 100));
     view.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&view, 5000));
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
     QQuickItem *rootItem = view.rootObject();
     QVERIFY(rootItem);
+    const QPoint frameOffset = view.geometry().topLeft() - view.frameGeometry().topLeft();
 
     QTRY_VERIFY(!rootItem->property("hasMouse").toBool());
     // Check the enter
-    QCursor::setPos(view.pos() + QPoint(50, 50));
+    QCursor::setPos(view.pos() + QPoint(50, 50) + frameOffset);
     QTRY_VERIFY(rootItem->property("hasMouse").toBool());
     // Now check the leave
-    QCursor::setPos(view.pos() - QPoint(50, 50));
+    QCursor::setPos(outside);
     QTRY_VERIFY(!rootItem->property("hasMouse").toBool());
 }
 
@@ -559,7 +563,7 @@ void tst_qquickwidget::mouseEventWindowPos()
     quick->setSource(testFileUrl("mouse.qml"));
     quick->move(50, 50);
     widget.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&widget, 5000));
+    QVERIFY(QTest::qWaitForWindowExposed(&widget));
     QQuickItem *rootItem = quick->rootObject();
     QVERIFY(rootItem);
 

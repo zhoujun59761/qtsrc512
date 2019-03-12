@@ -84,6 +84,8 @@ Win32MakefileGenerator::findLibraries(bool linkPrl, bool mergeLflags)
     if (impexts.isEmpty())
         impexts = project->values("QMAKE_EXTENSION_STATICLIB");
     QList<QMakeLocalFileName> dirs;
+    for (const ProString &dlib : project->values("QMAKE_DEFAULT_LIBDIRS"))
+        dirs.append(QMakeLocalFileName(dlib.toQString()));
   static const char * const lflags[] = { "LIBS", "LIBS_PRIVATE",
                                          "QMAKE_LIBS", "QMAKE_LIBS_PRIVATE", nullptr };
   for (int i = 0; lflags[i]; i++) {
@@ -520,6 +522,8 @@ void Win32MakefileGenerator::writeIncPart(QTextStream &t)
 
 void Win32MakefileGenerator::writeStandardParts(QTextStream &t)
 {
+    writeExportedVariables(t);
+
     t << "####### Compiler, tools and options\n\n";
     t << "CC            = " << var("QMAKE_CC") << endl;
     t << "CXX           = " << var("QMAKE_CXX") << endl;

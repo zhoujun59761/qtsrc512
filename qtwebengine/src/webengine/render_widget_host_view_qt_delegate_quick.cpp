@@ -54,7 +54,6 @@ namespace QtWebEngineCore {
 RenderWidgetHostViewQtDelegateQuick::RenderWidgetHostViewQtDelegateQuick(RenderWidgetHostViewQtDelegateClient *client, bool isPopup)
     : m_client(client)
     , m_isPopup(isPopup)
-    , m_isPasswordInput(false)
 {
     setFlag(ItemHasContents);
     setAcceptedMouseButtons(Qt::AllButtons);
@@ -64,7 +63,7 @@ RenderWidgetHostViewQtDelegateQuick::RenderWidgetHostViewQtDelegateQuick(RenderW
     setFocus(true);
     setActiveFocusOnTab(true);
 
-#ifdef Q_OS_OSX
+#if defined(Q_OS_MACOS) && !defined(QT_NO_OPENGL)
     // Check that the default QSurfaceFormat OpenGL profile is compatible with the global OpenGL
     // shared context profile, otherwise this could lead to a nasty crash.
     QOpenGLContext *globalSharedContext = QOpenGLContext::globalShareContext();
@@ -206,11 +205,9 @@ void RenderWidgetHostViewQtDelegateQuick::inputMethodStateChanged(bool editorVis
     if (parentItem())
         parentItem()->setFlag(QQuickItem::ItemAcceptsInputMethod, editorVisible && !passwordInput);
 
-    if (qApp->inputMethod()->isVisible() != editorVisible || m_isPasswordInput != passwordInput) {
-        qApp->inputMethod()->update(Qt::ImQueryInput | Qt::ImEnabled | Qt::ImHints);
+    qApp->inputMethod()->update(Qt::ImQueryInput | Qt::ImEnabled | Qt::ImHints);
+    if (qApp->inputMethod()->isVisible() != editorVisible)
         qApp->inputMethod()->setVisible(editorVisible);
-        m_isPasswordInput = passwordInput;
-    }
 }
 
 bool RenderWidgetHostViewQtDelegateQuick::event(QEvent *event)
@@ -327,8 +324,7 @@ void RenderWidgetHostViewQtDelegateQuick::geometryChanged(const QRectF &newGeome
     QQuickItem::geometryChanged(newGeometry, oldGeometry);
 
     if (window()) {
-        // TODO(pvarga): Use QQuickItem::mapToGlobal from Qt 5.7
-        const QPoint globalPos = window()->mapToGlobal(position().toPoint());
+        const QPointF globalPos = QQuickItem::mapToGlobal(position());
         if (globalPos != m_lastGlobalPos) {
             m_lastGlobalPos = globalPos;
             m_client->windowBoundsChanged();
@@ -366,10 +362,8 @@ QSGNode *RenderWidgetHostViewQtDelegateQuick::updatePaintNode(QSGNode *oldNode, 
 
 void RenderWidgetHostViewQtDelegateQuick::onWindowPosChanged()
 {
-    if (window()) {
-        // TODO(pvarga): Use QQuickItem::mapToGlobal from Qt 5.7
-        m_lastGlobalPos = window()->mapToGlobal(position().toPoint());
-    }
+    if (window())
+        m_lastGlobalPos = QQuickItem::mapToGlobal(position());
     m_client->windowBoundsChanged();
 }
 
@@ -377,6 +371,17 @@ void RenderWidgetHostViewQtDelegateQuick::onHide()
 {
     QFocusEvent event(QEvent::FocusOut, Qt::OtherFocusReason);
     m_client->forwardEvent(&event);
+}
+
+bool RenderWidgetHostViewQtDelegateQuick::copySurface(const QRect &rect, const QSize &size, QImage &image)
+{
+    image = QQuickItem::window()->grabWindow();
+    if (image.isNull())
+        return false;
+    QRect subrect = !rect.isEmpty() ? rect : image.rect();
+    image = image.copy(subrect);
+    image = image.scaled(size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    return true;
 }
 
 } // namespace QtWebEngineCore

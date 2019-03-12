@@ -61,6 +61,7 @@
 #include "net/base/load_flags.h"
 #include "net/http/http_content_disposition.h"
 #include "net/http/http_request_headers.h"
+#include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/redirect_util.h"
 #include "net/url_request/url_request.h"
@@ -187,6 +188,9 @@ std::unique_ptr<network::ResourceRequest> CreateResourceRequest(
   new_request->method = request_info->common_params.method;
   new_request->url = request_info->common_params.url;
   new_request->site_for_cookies = request_info->site_for_cookies;
+#if defined(TOOLKIT_QT)
+  new_request->first_party_url = request_info->first_party_url;
+#endif
 
   net::RequestPriority net_priority = net::HIGHEST;
   if (!request_info->is_main_frame &&
@@ -276,6 +280,9 @@ std::unique_ptr<NavigationRequestInfo> CreateNavigationRequestInfoForRedirect(
   return std::make_unique<NavigationRequestInfo>(
       std::move(new_common_params), std::move(new_begin_params),
       updated_resource_request.site_for_cookies,
+#if defined(TOOLKIT_QT)
+      previous_request_info.first_party_url,
+#endif
       previous_request_info.is_main_frame,
       previous_request_info.parent_is_main_frame,
       previous_request_info.are_ancestors_secure,
@@ -918,6 +925,16 @@ class NavigationURLLoaderImpl::URLLoaderRequestController
           network::mojom::URLLoaderClientEndpoints::New(
               response_url_loader_.PassInterface(),
               response_loader_binding_.Unbind());
+    }
+
+    // 304 responses should abort the navigation, rather than display the page.
+    // This needs to be after the URLLoader has been moved to
+    // |url_loader_client_endpoints| in order to abort the request, to avoid
+    // receiving unexpected call.
+    if (head.headers &&
+        head.headers->response_code() == net::HTTP_NOT_MODIFIED) {
+      OnComplete(network::URLLoaderCompletionStatus(net::ERR_ABORTED));
+      return;
     }
 
     bool is_download;

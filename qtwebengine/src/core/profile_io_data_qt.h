@@ -58,6 +58,7 @@ class ProxyConfigService;
 class URLRequestContext;
 class URLRequestContextStorage;
 class URLRequestJobFactoryImpl;
+class TransportSecurityPersister;
 }
 
 namespace QtWebEngineCore {
@@ -88,9 +89,12 @@ public:
     void generateUserAgent();
     void generateJobFactory();
     void regenerateJobFactory();
-    QWebEngineUrlRequestInterceptor *requestInterceptor();
     bool canSetCookie(const QUrl &firstPartyUrl, const QByteArray &cookieLine, const QUrl &url) const;
     bool canGetCookies(const QUrl &firstPartyUrl, const QUrl &url) const;
+
+    // Used in NetworkDelegateQt::OnBeforeURLRequest.
+    QWebEngineUrlRequestInterceptor *acquireInterceptor();
+    void releaseInterceptor();
 
     void setRequestContextData(content::ProtocolHandlerMap *protocolHandlers,
                                content::URLRequestInterceptorScopedVector request_interceptors);
@@ -101,6 +105,8 @@ public:
     void updateHttpCache(); // runs on ui thread
     void updateJobFactory(); // runs on ui thread
     void updateRequestInterceptor(); // runs on ui thread
+    void requestStorageGeneration(); //runs on ui thread
+    void createProxyConfig(); //runs on ui thread
 
 private:
     ProfileQt *m_profile;
@@ -113,6 +119,7 @@ private:
     std::unique_ptr<net::DhcpPacFileFetcherFactory> m_dhcpPacFileFetcherFactory;
     std::unique_ptr<net::HttpAuthPreferences> m_httpAuthPreferences;
     std::unique_ptr<net::URLRequestJobFactory> m_jobFactory;
+    std::unique_ptr<net::TransportSecurityPersister> m_transportSecurityPersister;
     base::WeakPtr<ProfileIODataQt> m_weakPtr;
     scoped_refptr<CookieMonsterDelegateQt> m_cookieDelegate;
     content::URLRequestInterceptorScopedVector m_requestInterceptors;
@@ -135,12 +142,10 @@ private:
     int m_httpCacheMaxSize = 0;
     bool m_initialized = false;
     bool m_updateAllStorage = false;
-    bool m_updateCookieStore = false;
-    bool m_updateHttpCache = false;
     bool m_updateJobFactory = false;
-    bool m_updateUserAgent = false;
     bool m_ignoreCertificateErrors = false;
     base::WeakPtrFactory<ProfileIODataQt> m_weakPtrFactory; // this should be always the last member
+    QString m_dataPath;
     DISALLOW_COPY_AND_ASSIGN(ProfileIODataQt);
 };
 } // namespace QtWebEngineCore

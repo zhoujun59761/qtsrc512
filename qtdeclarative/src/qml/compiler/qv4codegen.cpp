@@ -383,6 +383,7 @@ void Codegen::accept(Node *node)
 
 void Codegen::statement(Statement *ast)
 {
+    RecursionDepthCheck depthCheck(this, ast->lastSourceLocation());
     RegisterScope scope(this);
 
     bytecodeGenerator->setLocation(ast->firstSourceLocation());
@@ -395,11 +396,12 @@ void Codegen::statement(Statement *ast)
 
 void Codegen::statement(ExpressionNode *ast)
 {
-    RegisterScope scope(this);
-
     if (! ast) {
         return;
     } else {
+        RecursionDepthCheck depthCheck(this, ast->lastSourceLocation());
+        RegisterScope scope(this);
+
         Result r(nx);
         qSwap(_expr, r);
         VolatileMemoryLocations vLocs = scanVolatileMemoryLocations(ast);
@@ -426,6 +428,7 @@ void Codegen::condition(ExpressionNode *ast, const BytecodeGenerator::Label *ift
     if (!ast)
         return;
 
+    RecursionDepthCheck depthCheck(this, ast->lastSourceLocation());
     Result r(iftrue, iffalse, trueBlockFollowsCondition);
     qSwap(_expr, r);
     accept(ast);
@@ -449,6 +452,7 @@ void Codegen::condition(ExpressionNode *ast, const BytecodeGenerator::Label *ift
 
 Codegen::Reference Codegen::expression(ExpressionNode *ast)
 {
+    RecursionDepthCheck depthCheck(this, ast->lastSourceLocation());
     Result r;
     if (ast) {
         qSwap(_expr, r);
@@ -598,6 +602,10 @@ Codegen::Reference Codegen::targetForPatternElement(AST::PatternElement *p)
     Reference lhs = expression(p->bindingTarget);
     if (hasError)
         return lhs;
+    if (!lhs.isLValue()) {
+        throwReferenceError(p->bindingTarget->firstSourceLocation(), QStringLiteral("Binding target is not a reference."));
+        return lhs;
+    }
     lhs = lhs.asLValue();
     return lhs;
 }
@@ -2145,8 +2153,10 @@ bool Codegen::visit(ConditionalExpression *ast)
 
     iffalse.link();
     Reference ko = expression(ast->ko);
-    if (hasError)
+    if (hasError) {
+        jump_endif.link(); // dummy link, to prevent assert in Jump destructor from triggering
         return false;
+    }
     ko.loadInAccumulator();
 
     jump_endif.link();
@@ -2311,59 +2321,35 @@ bool Codegen::visit(TaggedTemplate *ast)
         break;
     }
 
-    int arrayTemp = createTemplateArray(ast->templateLiteral);
-    Q_UNUSED(arrayTemp);
+    createTemplateObject(ast->templateLiteral);
+    int templateObjectTemp = Reference::fromAccumulator(this).storeOnStack().stackSlot();
+    Q_UNUSED(templateObjectTemp);
     auto calldata = pushTemplateArgs(ast->templateLiteral);
     if (hasError)
         return false;
     ++calldata.argc;
-    Q_ASSERT(calldata.argv == arrayTemp + 1);
+    Q_ASSERT(calldata.argv == templateObjectTemp + 1);
     --calldata.argv;
 
     handleCall(base, calldata, functionObject, thisObject);
     return false;
 }
 
-int Codegen::createTemplateArray(TemplateLiteral *t)
+void Codegen::createTemplateObject(TemplateLiteral *t)
 {
-    int arrayTemp = bytecodeGenerator->newRegister();
+    TemplateObject obj;
 
-    RegisterScope scope(this);
-
-    int argc = 0;
-    int args = -1;
-    auto push = [this, &argc, &args](const QStringRef &arg) {
-        int temp = bytecodeGenerator->newRegister();
-        if (args == -1)
-            args = temp;
-        Instruction::LoadRuntimeString instr;
-        instr.stringId = registerString(arg.toString());
-        bytecodeGenerator->addInstruction(instr);
-        Instruction::StoreReg store;
-        store.reg = temp;
-        bytecodeGenerator->addInstruction(store);
-
-        ++argc;
-    };
-
-    for (TemplateLiteral *it = t; it; it = it->next)
-        push(it->value);
-
-    if (args == -1) {
-        Q_ASSERT(argc == 0);
-        args = 0;
+    for (TemplateLiteral *it = t; it; it = it->next) {
+        obj.strings.append(registerString(it->value.toString()));
+        obj.rawStrings.append(registerString(it->rawValue.toString()));
     }
 
-    Instruction::DefineArray call;
-    call.argc = argc;
-    call.args = Moth::StackSlot::createRegister(args);
-    bytecodeGenerator->addInstruction(call);
+    int index = _module->templateObjects.size();
+    _module->templateObjects.append(obj);
 
-    Instruction::StoreReg store;
-    store.reg = arrayTemp;
-    bytecodeGenerator->addInstruction(store);
-
-    return arrayTemp;
+    Instruction::GetTemplateObject getTemplateObject;
+    getTemplateObject.index = index;
+    bytecodeGenerator->addInstruction(getTemplateObject);
 }
 
 bool Codegen::visit(FunctionExpression *ast)

@@ -29,13 +29,14 @@
 #ifndef QMLPREVIEWAPPLICATION_H
 #define QMLPREVIEWAPPLICATION_H
 
+#include "qmlpreviewfilesystemwatcher.h"
+
 #include <private/qqmlpreviewclient_p.h>
 #include <private/qqmldebugconnection_p.h>
 
 #include <QtCore/qcoreapplication.h>
 #include <QtCore/qprocess.h>
 #include <QtCore/qtimer.h>
-#include <QtCore/qfilesystemwatcher.h>
 
 #include <QtNetwork/qabstractsocket.h>
 
@@ -71,13 +72,11 @@ private:
 
     QScopedPointer<QQmlDebugConnection> m_connection;
     QScopedPointer<QQmlPreviewClient> m_qmlPreviewClient;
-    QFileSystemWatcher m_watcher;
+    QmlPreviewFileSystemWatcher m_watcher;
 
     QTimer m_loadTimer;
     QTimer m_connectTimer;
     uint m_connectionAttempts;
-
-    QStringList m_pendingFiles;
 };
 
 #endif // QMLPREVIEWAPPLICATION_H

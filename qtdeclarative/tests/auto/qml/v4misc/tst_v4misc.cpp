@@ -40,6 +40,11 @@ private slots:
 
     void parserMisc_data();
     void parserMisc();
+
+    void subClassing_data();
+    void subClassing();
+
+    void nestingDepth();
 };
 
 void tst_v4misc::tdzOptimizations_data()
@@ -56,7 +61,7 @@ void tst_v4misc::tdzOptimizations()
     QFETCH(QString, scriptToCompile);
 
     QV4::ExecutionEngine v4;
-    QV4::Script script(&v4, nullptr, scriptToCompile);
+    QV4::Script script(&v4, nullptr, /*parse as binding*/false, scriptToCompile);
     script.parse();
     QVERIFY(!v4.hasException);
 
@@ -116,6 +121,8 @@ void tst_v4misc::parserMisc_data()
     QTest::newRow("[1]=7[A=8=9]") << QString("ReferenceError: left-hand side of assignment operator is not an lvalue");
     QTest::newRow("var asmvalsLen = asmvals{{{{{ngth}}}}};") << QString("SyntaxError: Expected token `;'");
     QTest::newRow("T||9[---L6i]") << QString("ReferenceError: Prefix ++ operator applied to value that is not a reference.");
+    QTest::newRow("a?b:[---Hi]") << QString("ReferenceError: Prefix ++ operator applied to value that is not a reference.");
+    QTest::newRow("[``]=1") << QString("ReferenceError: Binding target is not a reference.");
 }
 
 void tst_v4misc::parserMisc()
@@ -126,6 +133,68 @@ void tst_v4misc::parserMisc()
     QJSValue result = engine.evaluate(QString::fromUtf8(QTest::currentDataTag()));
     QVERIFY(result.isError());
     QCOMPARE(result.toString(), error);
+}
+
+void tst_v4misc::subClassing_data()
+{
+    QTest::addColumn<QString>("script");
+
+    QString code(
+                "class Foo extends %1 {"
+                "    constructor() { super(); this.reset(); }"
+                "    reset() { }"
+                "}"
+                "new Foo();");
+
+
+    QTest::newRow("Array") << code.arg("Array");
+    QTest::newRow("Boolean") << code.arg("Boolean");
+    QTest::newRow("Date") << code.arg("Date");
+    QTest::newRow("Function") << code.arg("Function");
+    QTest::newRow("Number") << code.arg("Number");
+    QTest::newRow("Map") << code.arg("Map");
+    QTest::newRow("Promise") << QString(
+            "class Foo extends Promise {"
+            "    constructor() { super(Function()); this.reset(); }"
+            "    reset() { }"
+            "}"
+            "new Foo();");
+    QTest::newRow("RegExp") << code.arg("RegExp");
+    QTest::newRow("Set") << code.arg("Set");
+    QTest::newRow("String") << code.arg("String");
+    QTest::newRow("WeakMap") << code.arg("WeakMap");
+    QTest::newRow("WeakSet") << code.arg("WeakSet");
+}
+
+void tst_v4misc::subClassing()
+{
+    QFETCH(QString, script);
+
+    QJSEngine engine;
+    QJSValue result = engine.evaluate(script);
+    QVERIFY(!result.isError());
+}
+
+void tst_v4misc::nestingDepth()
+{
+    { // left recursive
+        QString s(40000, '`');
+
+        QJSEngine engine;
+        QJSValue result = engine.evaluate(s);
+        QVERIFY(result.isError());
+        QCOMPARE(result.toString(), "SyntaxError: Maximum statement or expression depth exceeded");
+    }
+
+    { // right recursive
+        QString s(200000, '-');
+        s += "\nd";
+
+        QJSEngine engine;
+        QJSValue result = engine.evaluate(s);
+        QVERIFY(result.isError());
+        QCOMPARE(result.toString(), "SyntaxError: Maximum statement or expression depth exceeded");
+    }
 }
 
 QTEST_MAIN(tst_v4misc);

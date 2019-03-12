@@ -37,7 +37,7 @@ qhp.QtQuick.subprojects.examples.selectors = fake:example
 
 tagfile                 = ../../../doc/qtquick/qtquick.tags
 
-depends += qtcore qtqml qtqmltest qtgui qtlinguist qtquickcontrols qtquickcontrols2 qtdoc qtquickdialogs qtsensors qtwidgets qmake qtmultimedia qtgraphicaleffects qtsql
+depends += qtcore qtqml qtqmltest qtgui qtlinguist qtquickcontrols1 qtquickcontrols qtdoc qtquickdialogs qtsensors qtwidgets qmake qtmultimedia qtgraphicaleffects qtsql qtxmlpatterns
 
 headerdirs  += ..\
                ../../quickwidgets
@@ -52,10 +52,11 @@ exampledirs +=  ../../../examples/quick \
 
 imagedirs   += images
 
-
-#add particles sources
-headerdirs += ../../particles
-sourcedirs += ../../particles
+#add particles and shapes sources
+headerdirs += ../../particles \
+              ../../quickshapes
+sourcedirs += ../../particles \
+              ../../quickshapes
 
 #add imports directory because of dependencies
 headerdirs += ../../imports

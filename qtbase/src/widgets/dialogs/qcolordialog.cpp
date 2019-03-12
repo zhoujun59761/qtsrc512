@@ -57,7 +57,9 @@
 #include "qpainter.h"
 #include "qpixmap.h"
 #include "qpushbutton.h"
+#if QT_CONFIG(settings)
 #include "qsettings.h"
+#endif
 #include "qsharedpointer.h"
 #include "qstyle.h"
 #include "qstyleoption.h"
@@ -1851,7 +1853,7 @@ void QColorDialogPrivate::_q_addCustom()
     QColorDialogOptions::setCustomColor(nextCust, cs->currentColor());
     if (custom)
         custom->update();
-    nextCust = (nextCust+1) % 16;
+    nextCust = (nextCust+1) % QColorDialogOptions::customColorCount();
 }
 
 void QColorDialogPrivate::retranslateStrings()

@@ -521,7 +521,7 @@ void QWidgetWindow::handleMouseEvent(QMouseEvent *event)
         if (activePopupWidget->isEnabled()) {
             // deliver event
             qt_replay_popup_mouse_event = false;
-            QWidget *receiver = activePopupWidget;
+            QPointer<QWidget> receiver = activePopupWidget;
             QPoint widgetPos = mapped;
             if (qt_button_down)
                 receiver = qt_button_down;
@@ -642,7 +642,8 @@ void QWidgetWindow::handleMouseEvent(QMouseEvent *event)
     if (!widget)
         widget = m_widget;
 
-    if (event->type() == QEvent::MouseButtonPress)
+    const bool initialPress = event->buttons() == event->button();
+    if (event->type() == QEvent::MouseButtonPress && initialPress)
         qt_button_down = widget;
 
     QWidget *receiver = QApplicationPrivate::pickMouseReceiver(m_widget, event->windowPos().toPoint(), &mapped, event->type(), event->buttons(),
@@ -898,10 +899,10 @@ void QWidgetWindow::handleDragMoveEvent(QDragMoveEvent *event)
         const QPoint mapped = widget->mapFromGlobal(m_widget->mapToGlobal(event->pos()));
         QDragMoveEvent translated(mapped, event->possibleActions(), event->mimeData(),
                                   event->mouseButtons(), event->keyboardModifiers());
-        translated.setDropAction(event->dropAction());
-        translated.setAccepted(event->isAccepted());
 
         if (widget == m_dragTarget) { // Target widget unchanged: Send DragMove
+            translated.setDropAction(event->dropAction());
+            translated.setAccepted(event->isAccepted());
             QGuiApplication::forwardEvent(m_dragTarget, &translated, event);
         } else {
             if (m_dragTarget) { // Send DragLeave to previous
@@ -911,6 +912,9 @@ void QWidgetWindow::handleDragMoveEvent(QDragMoveEvent *event)
             }
             // Send DragEnter to new widget.
             handleDragEnterEvent(static_cast<QDragEnterEvent*>(event), widget);
+            // Handling 'DragEnter' should suffice for the application.
+            translated.setDropAction(event->dropAction());
+            translated.setAccepted(event->isAccepted());
             // The drag enter event is always immediately followed by a drag move event,
             // see QDragEnterEvent documentation.
             QGuiApplication::forwardEvent(m_dragTarget, &translated, event);

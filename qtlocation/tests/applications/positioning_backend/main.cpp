@@ -26,6 +26,7 @@
 **
 ****************************************************************************/
 #include "widget.h"
+#include "logwidget.h"
 #include <QLabel>
 
 #include <QApplication>
@@ -34,14 +35,16 @@ int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
 
-    Widget *w1 = new Widget;
-    Widget *w2 = new Widget;
+    LogWidget *log = new LogWidget;
+    Widget *w1 = new Widget(log);
+    Widget *w2 = new Widget(log);
 
     QTabWidget tabWidget;
     tabWidget.setTabPosition(QTabWidget::South);
 
     tabWidget.addTab(w1, "Instance 1");
     tabWidget.addTab(w2, "Instance 2");
+    tabWidget.addTab(log, "Logs");
 
     tabWidget.show();
     return a.exec();

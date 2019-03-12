@@ -58,7 +58,6 @@
 #include "qstyle.h"
 #include "qstyleoption.h"
 #include "qstylefactory.h"
-#include "qtextcodec.h"
 #include "qtooltip.h"
 #include "qtranslator.h"
 #include "qvariant.h"
@@ -1065,8 +1064,10 @@ QStyle *QApplication::style()
         if (!QApplicationPrivate::styleOverride.isEmpty()) {
             const QString style = QApplicationPrivate::styleOverride.toLower();
             app_style = QStyleFactory::create(style);
-            if (!app_style)
-                qWarning("QApplication: invalid style override passed, ignoring it.");
+            if (Q_UNLIKELY(!app_style)) {
+                qWarning("QApplication: invalid style override passed, ignoring it.\n"
+                "    Available styles: %s", qPrintable(QStyleFactory::keys().join(QLatin1String(", "))));
+            }
         }
         if (!app_style)
             app_style = QStyleFactory::create(QApplicationPrivate::desktopStyleKey());

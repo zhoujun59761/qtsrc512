@@ -247,6 +247,9 @@ static QLinearGradient qt_fusion_gradient(const QRect &rect, const QBrush &baseC
 
 static void qt_fusion_draw_arrow(Qt::ArrowType type, QPainter *painter, const QStyleOption *option, const QRect &rect, const QColor &color)
 {
+    if (rect.isEmpty())
+        return;
+
     const int arrowWidth = QStyleHelper::dpiScaled(14);
     const int arrowHeight = QStyleHelper::dpiScaled(8);
 
@@ -722,7 +725,6 @@ void QFusionStyle::drawPrimitive(PrimitiveElement elem,
 
         // Draw Outline
         painter->setPen( QPen(hasFocus ? highlightedOutline : outline));
-        painter->setBrush(option->palette.base());
         painter->drawRoundedRect(r.adjusted(0, 0, -1, -1), 2, 2);
 
         if (hasFocus) {

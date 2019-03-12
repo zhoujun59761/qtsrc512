@@ -60,6 +60,10 @@
 #include <QObject>
 #include <QTimerEvent>
 
+#if defined(OS_MACOSX)
+#include "ui/base/idle/idle.h"
+#endif
+
 #if defined(Q_OS_WIN)
 #include "ui/display/win/screen_win.h"
 #else
@@ -200,14 +204,19 @@ void BrowserMainPartsQt::PreMainMessageLoopStart()
 
 void BrowserMainPartsQt::PostMainMessageLoopRun()
 {
-    // The BrowserContext's destructor uses the MessageLoop so it should be deleted
+    // The ProfileQt's destructor uses the MessageLoop so it should be deleted
     // right before the RenderProcessHostImpl's destructor destroys it.
-    WebEngineContext::current()->destroyBrowserContext();
+    WebEngineContext::current()->destroyProfileAdapter();
 }
 
 int BrowserMainPartsQt::PreCreateThreads()
 {
     base::ThreadRestrictions::SetIOAllowed(true);
+
+#if defined(OS_MACOSX)
+    ui::InitIdleMonitor();
+#endif
+
     // Like ChromeBrowserMainExtraPartsViews::PreCreateThreads does.
 #if defined(Q_OS_WIN)
     display::Screen::SetScreenInstance(new display::win::ScreenWin);
