@@ -24,10 +24,6 @@ qtConfig(webengine-embedded-build) {
     !use_gold_linker: gn_args += use_gold=false
 }
 
-qtConfig(webengine-system-x11): hasX11Dependencies() {
-   gn_args += ozone_platform_x11=true
-}
-
 clang {
     clang_full_path = $$which($${QMAKE_CXX})
     # Remove the "/bin/clang++" part.
@@ -69,6 +65,7 @@ contains(QT_ARCH, "arm") {
         gn_args += arm_version=$$MARMV
     }
 
+    # TODO: use neon detection from qtbase
     !lessThan(MARMV, 8) {
         gn_args += arm_use_neon=true
     } else {
@@ -83,8 +80,16 @@ contains(QT_ARCH, "arm") {
         }
     }
 
-    if(isEmpty(MARMV)|lessThan(MARMV, 7)):contains(QMAKE_CFLAGS, "-marm"): gn_args += arm_use_thumb=false
-    else: contains(QMAKE_CFLAGS, "-mthumb"): gn_args += arm_use_thumb=true
+    qtConfig(webengine-arm-thumb) {
+        gn_args += arm_use_thumb=true # this adds -mthumb
+    } else {
+        gn_args += arm_use_thumb=false
+        !qtConfig(webengine-system-ffmpeg) {
+             # Fixme QTBUG-71772
+             gn_args += media_use_ffmpeg=false
+             gn_args += use_webaudio_ffmpeg=false
+        }
+    }
 }
 
 contains(QT_ARCH, "mips") {
@@ -147,7 +152,6 @@ host_build {
         gn_args += use_system_libpng=true
         qtConfig(webengine-printing-and-pdf): gn_args += pdfium_use_system_libpng=true
     }
-    qtConfig(webengine-system-png): gn_args += use_system_libpng=true
     qtConfig(webengine-system-jpeg): gn_args += use_system_libjpeg=true
     qtConfig(webengine-system-freetype): gn_args += use_system_freetype=true
     qtConfig(webengine-system-harfbuzz): gn_args += use_system_harfbuzz=true
@@ -163,7 +167,11 @@ host_build {
         gn_args += use_alsa=false
     }
     !packagesExist(libpci): gn_args += use_libpci=false
-    !packagesExist(xscrnsaver): gn_args += use_xscrnsaver=false
+
+    qtConfig(webengine-system-x11): hasX11Dependencies() {
+        gn_args += ozone_platform_x11=true
+        packagesExist(xscrnsaver): gn_args += use_xscrnsaver=true
+    }
 
     qtConfig(webengine-system-libevent): gn_args += use_system_libevent=true
     qtConfig(webengine-system-libwebp):  gn_args += use_system_libwebp=true

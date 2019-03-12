@@ -279,21 +279,23 @@ const TInputType &myMin(const TInputType &value1, const TInputType &value2)
 void myMessageOutput(QtMsgType type, const QMessageLogContext &context, const QString &msg)
 {
     QByteArray localMsg = msg.toLocal8Bit();
+    const char *file = context.file ? context.file : "";
+    const char *function = context.function ? context.function : "";
     switch (type) {
     case QtDebugMsg:
-        fprintf(stderr, "Debug: %s (%s:%u, %s)\n", localMsg.constData(), context.file, context.line, context.function);
+        fprintf(stderr, "Debug: %s (%s:%u, %s)\n", localMsg.constData(), file, context.line, function);
         break;
     case QtInfoMsg:
-        fprintf(stderr, "Info: %s (%s:%u, %s)\n", localMsg.constData(), context.file, context.line, context.function);
+        fprintf(stderr, "Info: %s (%s:%u, %s)\n", localMsg.constData(), file, context.line, function);
         break;
     case QtWarningMsg:
-        fprintf(stderr, "Warning: %s (%s:%u, %s)\n", localMsg.constData(), context.file, context.line, context.function);
+        fprintf(stderr, "Warning: %s (%s:%u, %s)\n", localMsg.constData(), file, context.line, function);
         break;
     case QtCriticalMsg:
-        fprintf(stderr, "Critical: %s (%s:%u, %s)\n", localMsg.constData(), context.file, context.line, context.function);
+        fprintf(stderr, "Critical: %s (%s:%u, %s)\n", localMsg.constData(), file, context.line, function);
         break;
     case QtFatalMsg:
-        fprintf(stderr, "Fatal: %s (%s:%u, %s)\n", localMsg.constData(), context.file, context.line, context.function);
+        fprintf(stderr, "Fatal: %s (%s:%u, %s)\n", localMsg.constData(), file, context.line, function);
         break;
     }
 }
@@ -595,8 +597,7 @@ namespace QT_NAMESPACE {
 //! [43]
 class MyClass : public QObject
 {
-
-  private:
+private:
     Q_DISABLE_COPY(MyClass)
 };
 
@@ -605,22 +606,21 @@ class MyClass : public QObject
 //! [44]
 class MyClass : public QObject
 {
-
-  private:
-     MyClass(const MyClass &);
-     MyClass &operator=(const MyClass &);
+private:
+    MyClass(const MyClass &) = delete;
+    MyClass &operator=(const MyClass &) = delete;
 };
 //! [44]
 
 //! [45]
-  QWidget w = QWidget();
+QWidget w = QWidget();
 //! [45]
 
 //! [46]
-        // Instead of comparing with 0.0
-                qFuzzyCompare(0.0,1.0e-200); // This will return false
-        // Compare adding 1 to both values will fix the problem
-                qFuzzyCompare(1 + 0.0, 1 + 1.0e-200); // This will return true
+// Instead of comparing with 0.0
+qFuzzyCompare(0.0, 1.0e-200); // This will return false
+// Compare adding 1 to both values will fix the problem
+qFuzzyCompare(1 + 0.0, 1 + 1.0e-200); // This will return true
 //! [46]
 
 //! [47]
@@ -649,24 +649,24 @@ template<> class QTypeInfo<A> : public QTypeInfoMerger<A, B, C, D> {};
 //! [52]
     struct Foo {
         void overloadedFunction();
-        void overloadedFunction(int, QString);
+        void overloadedFunction(int, const QString &);
     };
     ... qOverload<>(&Foo::overloadedFunction)
-    ... qOverload<int, QString>(&Foo::overloadedFunction)
+    ... qOverload<int, const QString &>(&Foo::overloadedFunction)
 //! [52]
 
 //! [53]
     ... QOverload<>::of(&Foo::overloadedFunction)
-    ... QOverload<int, QString>::of(&Foo::overloadedFunction)
+    ... QOverload<int, const QString &>::of(&Foo::overloadedFunction)
 //! [53]
 
 //! [54]
     struct Foo {
-        void overloadedFunction(int, QString);
-        void overloadedFunction(int, QString) const;
+        void overloadedFunction(int, const QString &);
+        void overloadedFunction(int, const QString &) const;
     };
-    ... qConstOverload<int, QString>(&Foo::overloadedFunction)
-    ... qNonConstOverload<int, QString>(&Foo::overloadedFunction)
+    ... qConstOverload<int, const QString &>(&Foo::overloadedFunction)
+    ... qNonConstOverload<int, const QString &>(&Foo::overloadedFunction)
 //! [54]
 
 //! [qlikely]

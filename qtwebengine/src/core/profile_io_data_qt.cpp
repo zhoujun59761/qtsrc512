@@ -59,6 +59,7 @@
 #include "net/http/http_cache.h"
 #include "net/http/http_server_properties_impl.h"
 #include "net/http/http_network_session.h"
+#include "net/http/transport_security_persister.h"
 #include "net/proxy_resolution/dhcp_pac_file_fetcher_factory.h"
 #include "net/proxy_resolution/pac_file_fetcher_impl.h"
 #include "net/proxy_resolution/proxy_config_service.h"
@@ -209,9 +210,9 @@ void ProfileIODataQt::initializeOnIOThread()
     // this binds factory to io thread
     m_weakPtr = m_weakPtrFactory.GetWeakPtr();
     QMutexLocker lock(&m_mutex);
-    m_initialized = true;
     generateAllStorage();
     generateJobFactory();
+    m_initialized = true;
 }
 
 void ProfileIODataQt::initializeOnUIThread()
@@ -226,6 +227,7 @@ void ProfileIODataQt::initializeOnUIThread()
         protocolHandlerRegistry->CreateJobInterceptorFactory();
     m_cookieDelegate = new CookieMonsterDelegateQt();
     m_cookieDelegate->setClient(m_profile->profileAdapter()->cookieStore());
+    createProxyConfig();
 }
 
 void ProfileIODataQt::cancelAllUrlRequests()
@@ -261,12 +263,13 @@ void ProfileIODataQt::generateStorage()
 
     // We must stop all requests before deleting their backends.
     if (m_storage) {
-        m_cookieDelegate->setCookieMonster(0);
-        m_storage->set_cookie_store(0);
+        m_cookieDelegate->setCookieMonster(nullptr);
+        m_storage->set_cookie_store(nullptr);
         cancelAllUrlRequests();
         // we need to get rid of dangling pointer due to coming storage deletion
-        m_urlRequestContext->set_http_transaction_factory(0);
+        m_urlRequestContext->set_http_transaction_factory(nullptr);
         m_httpNetworkSession.reset();
+        m_transportSecurityPersister.reset();
     }
 
     m_storage.reset(new net::URLRequestContextStorage(m_urlRequestContext.get()));
@@ -280,8 +283,27 @@ void ProfileIODataQt::generateStorage()
 //    ct_verifier->AddLogs(net::ct::CreateLogVerifiersForKnownLogs());
     m_storage->set_cert_transparency_verifier(std::move(ct_verifier));
     m_storage->set_ct_policy_enforcer(base::WrapUnique(new net::DefaultCTPolicyEnforcer()));
+    m_storage->set_host_resolver(net::HostResolver::CreateDefaultResolver(NULL));
+    m_storage->set_ssl_config_service(std::make_unique<net::SSLConfigServiceDefaults>());
+    m_storage->set_http_auth_handler_factory(net::HttpAuthHandlerFactory::CreateDefault(
+                                                 m_urlRequestContext->host_resolver()));
+    m_storage->set_transport_security_state(std::make_unique<net::TransportSecurityState>());
 
-    std::unique_ptr<net::HostResolver> host_resolver(net::HostResolver::CreateDefaultResolver(NULL));
+    if (!m_dataPath.isEmpty()) {
+        scoped_refptr<base::SequencedTaskRunner> background_task_runner(
+                    base::CreateSequencedTaskRunnerWithTraits(
+        {base::MayBlock(),
+         base::TaskPriority::BACKGROUND,
+         base::TaskShutdownBehavior::BLOCK_SHUTDOWN}));
+        m_transportSecurityPersister =
+                std::make_unique<net::TransportSecurityPersister>(
+                    m_urlRequestContext->transport_security_state(),
+                    toFilePath(m_dataPath),
+                    background_task_runner);
+    };
+
+    m_storage->set_http_server_properties(std::unique_ptr<net::HttpServerProperties>(
+                                              new net::HttpServerPropertiesImpl));
 
     // The System Proxy Resolver has issues on Windows with unconfigured network cards,
     // which is why we want to use the v8 one
@@ -294,28 +316,9 @@ void ProfileIODataQt::generateStorage()
                                                 std::unique_ptr<net::ProxyConfigService>(proxyConfigService),
                                                 net::PacFileFetcherImpl::CreateWithFileUrlSupport(m_urlRequestContext.get()),
                                                 m_dhcpPacFileFetcherFactory->Create(m_urlRequestContext.get()),
-                                                host_resolver.get(),
+                                                m_urlRequestContext->host_resolver(),
                                                 nullptr /* NetLog */,
-                                                m_networkDelegate.get()));
-
-    m_storage->set_ssl_config_service(std::make_unique<net::SSLConfigServiceDefaults>());
-    m_storage->set_transport_security_state(std::unique_ptr<net::TransportSecurityState>(
-                                                new net::TransportSecurityState()));
-
-    if (!m_httpAuthPreferences)
-        m_httpAuthPreferences.reset(new net::HttpAuthPreferences());
-
-    m_storage->set_http_auth_handler_factory(net::HttpAuthHandlerFactory::CreateDefault(
-                                                 host_resolver.get(),
-                                                 m_httpAuthPreferences.get()
-#if (defined(OS_POSIX) && !defined(OS_ANDROID)) || defined(OS_FUCHSIA)
-                                                 , std::string() /* gssapi library name */
-#endif
-                                            ));
-    m_storage->set_http_server_properties(std::unique_ptr<net::HttpServerProperties>(
-                                              new net::HttpServerPropertiesImpl));
-     // Give |m_storage| ownership at the end in case it's |mapped_host_resolver|.
-    m_storage->set_host_resolver(std::move(host_resolver));
+                                                m_urlRequestContext->network_delegate()));
 }
 
 
@@ -323,10 +326,8 @@ void ProfileIODataQt::generateCookieStore()
 {
     Q_ASSERT(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
     Q_ASSERT(m_urlRequestContext);
-    Q_ASSERT(m_storage);
 
     QMutexLocker lock(&m_mutex);
-    m_updateCookieStore = false;
 
     scoped_refptr<net::SQLiteChannelIDStore> channel_id_db;
     if (!m_channelIdPath.isEmpty() && m_persistentCookiesPolicy != ProfileAdapter::NoPersistentCookies) {
@@ -339,11 +340,6 @@ void ProfileIODataQt::generateCookieStore()
     m_storage->set_channel_id_service(
             base::WrapUnique(new net::ChannelIDService(
                     new net::DefaultChannelIDStore(channel_id_db.get()))));
-
-    // Unset it first to get a chance to destroy and flush the old cookie store before
-    // opening a new on possibly the same file.
-    m_cookieDelegate->setCookieMonster(0);
-    m_storage->set_cookie_store(0);
 
     std::unique_ptr<net::CookieStore> cookieStore;
     switch (m_persistentCookiesPolicy) {
@@ -384,11 +380,6 @@ void ProfileIODataQt::generateCookieStore()
     const std::vector<std::string> cookieableSchemes(kCookieableSchemes,
                                                      kCookieableSchemes + arraysize(kCookieableSchemes));
     cookieMonster->SetCookieableSchemes(cookieableSchemes);
-
-    if (!m_updateAllStorage && m_updateHttpCache) {
-        // HttpCache needs to be regenerated when we generate a new channel id service
-        generateHttpCache();
-    }
 }
 
 void ProfileIODataQt::generateUserAgent()
@@ -398,8 +389,6 @@ void ProfileIODataQt::generateUserAgent()
     Q_ASSERT(m_storage);
 
     QMutexLocker lock(&m_mutex);
-    m_updateUserAgent = false;
-
     m_storage->set_http_user_agent_settings(std::unique_ptr<net::HttpUserAgentSettings>(
         new net::StaticHttpUserAgentSettings(m_httpAcceptLanguage.toStdString(),
                                              m_httpUserAgent.toStdString())));
@@ -412,10 +401,6 @@ void ProfileIODataQt::generateHttpCache()
     Q_ASSERT(m_storage);
 
     QMutexLocker lock(&m_mutex);
-    m_updateHttpCache = false;
-
-    if (m_updateCookieStore)
-        generateCookieStore();
 
     net::HttpCache::DefaultBackend* main_backend = 0;
     switch (m_httpCacheType) {
@@ -566,6 +551,35 @@ void ProfileIODataQt::setFullConfiguration()
     m_httpCachePath = m_profileAdapter->httpCachePath();
     m_httpCacheMaxSize = m_profileAdapter->httpCacheMaxSize();
     m_customUrlSchemes = m_profileAdapter->customUrlSchemes();
+    m_dataPath = m_profileAdapter->dataPath();
+}
+
+void ProfileIODataQt::requestStorageGeneration() {
+    Q_ASSERT(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+    QMutexLocker lock(&m_mutex);
+    if (m_initialized && !m_updateAllStorage) {
+        m_updateAllStorage = true;
+        createProxyConfig();
+        content::BrowserThread::PostTask(content::BrowserThread::IO, FROM_HERE,
+                                         base::Bind(&ProfileIODataQt::generateAllStorage, m_weakPtr));
+    }
+}
+
+// TODO(miklocek): mojofy ProxyConfigServiceQt
+void ProfileIODataQt::createProxyConfig()
+{
+    Q_ASSERT(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+    QMutexLocker lock(&m_mutex);
+    // We must create the proxy config service on the UI loop on Linux because it
+    // must synchronously run on the glib message loop. This will be passed to
+    // the URLRequestContextStorage on the IO thread in GetURLRequestContext().
+    Q_ASSERT(m_proxyConfigService == 0);
+    m_proxyConfigService =
+            new ProxyConfigServiceQt(
+                net::ProxyResolutionService::CreateSystemProxyConfigService(
+                    content::BrowserThread::GetTaskRunnerForThread(content::BrowserThread::IO)));
+    //pass interface to io thread
+    m_proxyResolverFactoryInterface = ChromeMojoProxyResolverFactory::CreateWithStrongBinding().PassInterface();
 }
 
 void ProfileIODataQt::updateStorageSettings()
@@ -580,23 +594,7 @@ void ProfileIODataQt::updateStorageSettings()
         file::ForgetServiceUserIdUserDirAssociation(userId);
         file::AssociateServiceUserIdWithUserDir(userId, toFilePath(m_profileAdapter->dataPath()));
     }
-
-    if (!m_updateAllStorage) {
-        m_updateAllStorage = true;
-        // We must create the proxy config service on the UI loop on Linux because it
-        // must synchronously run on the glib message loop. This will be passed to
-        // the URLRequestContextStorage on the IO thread in GetURLRequestContext().
-        Q_ASSERT(m_proxyConfigService == 0);
-        m_proxyConfigService =
-                new ProxyConfigServiceQt(
-                    net::ProxyResolutionService::CreateSystemProxyConfigService(
-                        content::BrowserThread::GetTaskRunnerForThread(content::BrowserThread::IO)));
-        //pass interface to io thread
-        m_proxyResolverFactoryInterface = ChromeMojoProxyResolverFactory::CreateWithStrongBinding().PassInterface();
-        if (m_initialized)
-            content::BrowserThread::PostTask(content::BrowserThread::IO, FROM_HERE,
-                                             base::Bind(&ProfileIODataQt::generateAllStorage, m_weakPtr));
-    }
+    requestStorageGeneration();
 }
 
 void ProfileIODataQt::updateCookieStore()
@@ -606,13 +604,7 @@ void ProfileIODataQt::updateCookieStore()
     m_persistentCookiesPolicy = m_profileAdapter->persistentCookiesPolicy();
     m_cookiesPath = m_profileAdapter->cookiesPath();
     m_channelIdPath = m_profileAdapter->channelIdPath();
-
-    if (m_initialized && !m_updateAllStorage && !m_updateCookieStore) {
-        m_updateCookieStore = true;
-        m_updateHttpCache = true;
-        content::BrowserThread::PostTask(content::BrowserThread::IO, FROM_HERE,
-                                         base::Bind(&ProfileIODataQt::generateCookieStore, m_weakPtr));
-    }
+    requestStorageGeneration();
 }
 
 void ProfileIODataQt::updateUserAgent()
@@ -621,12 +613,7 @@ void ProfileIODataQt::updateUserAgent()
     QMutexLocker lock(&m_mutex);
     m_httpAcceptLanguage = m_profileAdapter->httpAcceptLanguage();
     m_httpUserAgent = m_profileAdapter->httpUserAgent();
-
-    if (m_initialized && !m_updateAllStorage && !m_updateUserAgent) {
-        m_updateUserAgent = true;
-        content::BrowserThread::PostTask(content::BrowserThread::IO, FROM_HERE,
-                                         base::Bind(&ProfileIODataQt::generateUserAgent, m_weakPtr));
-    }
+    requestStorageGeneration();
 }
 
 void ProfileIODataQt::updateHttpCache()
@@ -645,12 +632,7 @@ void ProfileIODataQt::updateHttpCache()
             content::BrowsingDataRemover::ORIGIN_TYPE_UNPROTECTED_WEB |
                         content::BrowsingDataRemover::ORIGIN_TYPE_PROTECTED_WEB);
     }
-
-    if (m_initialized && !m_updateAllStorage && !m_updateHttpCache) {
-        m_updateHttpCache = true;
-        content::BrowserThread::PostTask(content::BrowserThread::IO, FROM_HERE,
-                                         base::Bind(&ProfileIODataQt::generateHttpCache, m_weakPtr));
-    }
+    requestStorageGeneration();
 }
 
 void ProfileIODataQt::updateJobFactory()
@@ -675,12 +657,15 @@ void ProfileIODataQt::updateRequestInterceptor()
     // We in this case do not need to regenerate any Chromium classes.
 }
 
-QWebEngineUrlRequestInterceptor *ProfileIODataQt::requestInterceptor()
+QWebEngineUrlRequestInterceptor *ProfileIODataQt::acquireInterceptor()
 {
-    // used in NetworkDelegateQt::OnBeforeURLRequest
-    Q_ASSERT(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
-    QMutexLocker lock(&m_mutex);
+    m_mutex.lock();
     return m_requestInterceptor;
+}
+
+void ProfileIODataQt::releaseInterceptor()
+{
+    m_mutex.unlock();
 }
 
 bool ProfileIODataQt::canSetCookie(const QUrl &firstPartyUrl, const QByteArray &cookieLine, const QUrl &url) const

@@ -95,25 +95,25 @@ qtConfig(vulkan) {
 }
 
 !qtConfig(system-xcb) {
-    QMAKE_USE += xcb-static xcb
+    QMAKE_USE += xcb-static
 } else {
-    qtConfig(xkb): QMAKE_USE += xcb_xkb
-    qtConfig(xcb-render): QMAKE_USE += xcb_render
     qtConfig(xcb-xinput): QMAKE_USE += xcb_xinput
-    QMAKE_USE += xcb_syslibs
+    QMAKE_USE += \
+        xcb_icccm xcb_image xcb_keysyms xcb_randr xcb_render xcb_renderutil \
+        xcb_shape xcb_shm xcb_sync xcb_xfixes xcb_xinerama
 }
+QMAKE_USE += xcb
 
-# libxkbcommon
-!qtConfig(xkbcommon-system) {
-    qtConfig(xkb) {
-        include(../../../3rdparty/xkbcommon-x11.pri)
-    } else {
-        include(../../../3rdparty/xkbcommon.pri)
-    }
-} else {
-    QMAKE_USE += xkbcommon
+QMAKE_USE += xkbcommon
+qtConfig(xkb) {
+    QMAKE_USE += xkbcommon_x11
+    qtConfig(system-xcb): QMAKE_USE += xcb_xkb
 }
 
 qtConfig(dlopen): QMAKE_USE += libdl
+
+# qxcbkeyboard.cpp's KeyTbl has more than 256 levels of expansion and older
+# Clang uses that as a limit (it's 1024 in current versions).
+clang:!intel_icc: QMAKE_CXXFLAGS += -ftemplate-depth=1024
 
 load(qt_module)

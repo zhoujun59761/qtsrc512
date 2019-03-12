@@ -88,6 +88,7 @@ public:
     void inputMethodStateChanged(bool editorVisible, bool passwordInput) override;
     void setInputMethodHints(Qt::InputMethodHints) override;
     void setClearColor(const QColor &color) override;
+    bool copySurface(const QRect &, const QSize &, QImage &) override;
 
 protected:
     bool event(QEvent *event) override;
@@ -109,7 +110,6 @@ private:
     RenderWidgetHostViewQtDelegateClient *m_client;
     QScopedPointer<QQuickItem> m_rootItem;
     bool m_isPopup;
-    bool m_isPasswordInput;
     QColor m_clearColor;
     QPoint m_lastGlobalPos;
     QList<QMetaObject::Connection> m_windowConnections;

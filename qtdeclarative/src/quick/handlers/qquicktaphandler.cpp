@@ -107,6 +107,10 @@ static bool dragOverThreshold(const QQuickEventPoint *point)
 
 bool QQuickTapHandler::wantsEventPoint(QQuickEventPoint *point)
 {
+    if (!point->pointerEvent()->asPointerMouseEvent() &&
+            !point->pointerEvent()->asPointerTouchEvent() &&
+            !point->pointerEvent()->asPointerTabletEvent() )
+        return false;
     // If the user has not violated any constraint, it could be a tap.
     // Otherwise we want to give up the grab so that a competing handler
     // (e.g. DragHandler) gets a chance to take over.
@@ -308,8 +312,12 @@ void QQuickTapHandler::setPressed(bool press, bool cancel, QQuickEventPoint *poi
             // on release, ungrab after emitting changed signals
             setExclusiveGrab(point, press);
         }
-        if (cancel)
+        if (cancel) {
             emit canceled(point);
+            setExclusiveGrab(point, false);
+            reset();
+            emit pointChanged();
+        }
     }
 }
 

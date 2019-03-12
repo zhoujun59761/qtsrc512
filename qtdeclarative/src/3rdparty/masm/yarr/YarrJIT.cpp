@@ -640,7 +640,7 @@ class YarrGenerator : private DefaultMacroAssembler {
                 subPtr(Imm32(callFrameSizeInBytes), stackPointerRegister);
                 if (callFrameSizeInBytes <= 128) {
                     for (unsigned offset = 0; offset < callFrameSizeInBytes; offset += sizeof(intptr_t))
-                        storePtr(TrustedImmPtr(0), Address(regT0, -8 - offset));
+                        storePtr(TrustedImmPtr(0), Address(regT0, -8 - int(offset)));
                 } else {
                     Label zeroLoop = label();
                     subPtr(TrustedImm32(sizeof(intptr_t) * 2), regT0);
@@ -3531,14 +3531,14 @@ public:
 
         if (compileMode == MatchOnly) {
             if (m_charSize == Char8)
-                codeBlock.set8BitCodeMatchOnly(FINALIZE_CODE(linkBuffer, "YarJIT", "Match-only 8-bit regular expression"));
+                codeBlock.set8BitCodeMatchOnly(FINALIZE_CODE(linkBuffer, "YarrJIT", "Match-only 8-bit regular expression"));
             else
-                codeBlock.set16BitCodeMatchOnly(FINALIZE_CODE(linkBuffer, "YarJIT", "Match-only 16-bit regular expression"));
+                codeBlock.set16BitCodeMatchOnly(FINALIZE_CODE(linkBuffer, "YarrJIT", "Match-only 16-bit regular expression"));
         } else {
             if (m_charSize == Char8)
-                codeBlock.set8BitCode(FINALIZE_CODE(linkBuffer, "YarJIT", "8-bit regular expression"));
+                codeBlock.set8BitCode(FINALIZE_CODE(linkBuffer, "YarrJIT", "8-bit regular expression"));
             else
-                codeBlock.set16BitCode(FINALIZE_CODE(linkBuffer, "YarJIT", "16-bit regular expression"));
+                codeBlock.set16BitCode(FINALIZE_CODE(linkBuffer, "YarrJIT", "16-bit regular expression"));
         }
         if (m_failureReason)
             codeBlock.setFallBackWithFailureReason(*m_failureReason);

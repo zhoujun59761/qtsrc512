@@ -488,6 +488,7 @@ QScroller::QScroller(QObject *target)
     : d_ptr(new QScrollerPrivate(this, target))
 {
     Q_ASSERT(target); // you can't create a scroller without a target in any normal way
+    setParent(target);
     Q_D(QScroller);
     d->init();
 }
@@ -1725,10 +1726,12 @@ void QScrollerPrivate::setState(QScroller::State newstate)
         sendEvent(target, &se);
         firstScroll = true;
     }
-    if (state == QScroller::Dragging || state == QScroller::Scrolling)
-        qt_activeScrollers()->push_back(q);
-    else
+    if (state == QScroller::Dragging || state == QScroller::Scrolling) {
+        if (!qt_activeScrollers()->contains(q))
+            qt_activeScrollers()->push_back(q);
+    } else {
         qt_activeScrollers()->removeOne(q);
+    }
     emit q->stateChanged(state);
 }
 

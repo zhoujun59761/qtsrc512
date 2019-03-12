@@ -183,13 +183,13 @@ bool usingSoftwareDynamicGL()
 scoped_refptr<QtWebEngineCore::WebEngineContext> WebEngineContext::m_handle;
 bool WebEngineContext::m_destroyed = false;
 
-void WebEngineContext::destroyBrowserContext()
+void WebEngineContext::destroyProfileAdapter()
 {
     if (m_defaultProfileAdapter)
         qWarning("PostMainMessageLoopRun is done, but global profile still exists !");
 }
 
-void WebEngineContext::addBrowserContext(ProfileAdapter *profileAdapter)
+void WebEngineContext::addProfileAdapter(ProfileAdapter *profileAdapter)
 {
     Q_ASSERT(!m_profileAdapters.contains(profileAdapter));
     const QString path = profileAdapter->dataPath();
@@ -205,7 +205,7 @@ void WebEngineContext::addBrowserContext(ProfileAdapter *profileAdapter)
     m_profileAdapters.append(profileAdapter);
 }
 
-void WebEngineContext::removeBrowserContext(ProfileAdapter *profileAdapter)
+void WebEngineContext::removeProfileAdapter(ProfileAdapter *profileAdapter)
 {
     m_profileAdapters.removeAll(profileAdapter);
 }
@@ -354,10 +354,8 @@ WebEngineContext::WebEngineContext()
         appArgs.append(QString::fromLocal8Bit(qgetenv(kChromiumFlagsEnv)).split(' '));
     }
 
-#ifdef Q_OS_WIN
     bool enableWebGLSoftwareRendering =
             appArgs.removeAll(QStringLiteral("--enable-webgl-software-rendering"));
-#endif
 
     bool useEmbeddedSwitches = false;
 #if defined(QTWEBENGINE_EMBEDDED_SWITCHES)
@@ -430,6 +428,8 @@ WebEngineContext::WebEngineContext()
     appendToFeatureSwitch(parsedCommandLine, switches::kDisableFeatures, features::kEnableSurfaceSynchronization.name);
     // The video-capture service is not functioning at this moment (since 69)
     appendToFeatureSwitch(parsedCommandLine, switches::kDisableFeatures, features::kMojoVideoCapture.name);
+    // We do not yet support the internal video capture API.
+    appendToFeatureSwitch(parsedCommandLine, switches::kDisableFeatures, features::kUseVideoCaptureApiForDevToolsSnapshots.name);
 
     if (useEmbeddedSwitches) {
         // embedded switches are based on the switches for Android, see content/browser/android/content_startup_flags.cc
@@ -452,12 +452,10 @@ WebEngineContext::WebEngineContext()
     bool tryGL =
             !usingANGLE()
             && (!usingSoftwareDynamicGL()
-#ifdef Q_OS_WIN
-                // If user requested WebGL support on Windows, instead of using Skia rendering to
-                // bitmaps, use software rendering via opengl32sw.dll. This might be less
+                // If user requested WebGL support instead of using Skia rendering to
+                // bitmaps, use software rendering via software OpenGL. This might be less
                 // performant, but at least provides WebGL support.
                 || enableWebGLSoftwareRendering
-#endif
                 )
             && !usingQtQuick2DRenderer();
 
@@ -524,12 +522,10 @@ WebEngineContext::WebEngineContext()
     if (glType) {
         parsedCommandLine->AppendSwitchASCII(switches::kUseGL, glType);
         parsedCommandLine->AppendSwitch(switches::kInProcessGPU);
-#ifdef Q_OS_WIN
         if (enableWebGLSoftwareRendering) {
             parsedCommandLine->AppendSwitch(switches::kDisableGpuRasterization);
             parsedCommandLine->AppendSwitch(switches::kIgnoreGpuBlacklist);
         }
-#endif
     } else {
         parsedCommandLine->AppendSwitch(switches::kDisableGpu);
     }

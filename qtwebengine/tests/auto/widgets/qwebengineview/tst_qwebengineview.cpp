@@ -46,9 +46,10 @@
 #include <QTcpSocket>
 #include <QStyle>
 #include <QtWidgets/qaction.h>
+#include <QWebEngineProfile>
 
 #define VERIFY_INPUTMETHOD_HINTS(actual, expect) \
-    QVERIFY(actual == expect);
+    QVERIFY(actual == (expect | Qt::ImhNoPredictiveText | Qt::ImhNoTextHandles | Qt::ImhNoEditMenu));
 
 #define QTRY_COMPARE_WITH_TIMEOUT_FAIL_BLOCK(__expr, __expected, __timeout, __fail_block) \
 do { \
@@ -167,6 +168,7 @@ private Q_SLOTS:
     void inputFieldOverridesShortcuts();
 
     void softwareInputPanel();
+    void inputContextQueryInput();
     void inputMethods();
     void textSelectionInInputField();
     void textSelectionOutOfInputField();
@@ -191,6 +193,8 @@ private Q_SLOTS:
     void visibilityState();
     void jsKeyboardEvent();
     void deletePage();
+    void closeOpenerTab();
+    void switchPage();
 };
 
 // This will be called before the first test function is executed.
@@ -1688,6 +1692,24 @@ void tst_QWebEngineView::inputFieldOverridesShortcuts()
     QTRY_VERIFY(actionTriggered);
 }
 
+struct InputMethodInfo
+{
+    InputMethodInfo(const int cursorPosition,
+                    const int anchorPosition,
+                    QString surroundingText,
+                    QString selectedText)
+        : cursorPosition(cursorPosition)
+        , anchorPosition(anchorPosition)
+        , surroundingText(surroundingText)
+        , selectedText(selectedText)
+    {}
+
+    const int cursorPosition;
+    const int anchorPosition;
+    QString surroundingText;
+    QString selectedText;
+};
+
 class TestInputContext : public QPlatformInputContext
 {
 public:
@@ -1717,7 +1739,27 @@ public:
         return m_visible;
     }
 
+    virtual void update(Qt::InputMethodQueries queries)
+    {
+        if (!qApp->focusObject())
+            return;
+
+        if (!(queries & Qt::ImQueryInput))
+            return;
+
+        QInputMethodQueryEvent imQueryEvent(Qt::ImQueryInput);
+        QApplication::sendEvent(qApp->focusObject(), &imQueryEvent);
+
+        const int cursorPosition = imQueryEvent.value(Qt::ImCursorPosition).toInt();
+        const int anchorPosition = imQueryEvent.value(Qt::ImAnchorPosition).toInt();
+        QString surroundingText = imQueryEvent.value(Qt::ImSurroundingText).toString();
+        QString selectedText = imQueryEvent.value(Qt::ImCurrentSelection).toString();
+
+        infos.append(InputMethodInfo(cursorPosition, anchorPosition, surroundingText, selectedText));
+    }
+
     bool m_visible;
+    QList<InputMethodInfo> infos;
 };
 
 void tst_QWebEngineView::softwareInputPanel()
@@ -1776,6 +1818,156 @@ void tst_QWebEngineView::softwareInputPanel()
     QTest::mouseClick(view.focusProxy(), Qt::LeftButton, 0, btnDivCenter);
 
     QVERIFY(!testContext.isInputPanelVisible());
+}
+
+void tst_QWebEngineView::inputContextQueryInput()
+{
+    TestInputContext testContext;
+    QWebEngineView view;
+    view.resize(640, 480);
+    view.show();
+
+    QSignalSpy selectionChangedSpy(&view, SIGNAL(selectionChanged()));
+    QSignalSpy loadFinishedSpy(&view, SIGNAL(loadFinished(bool)));
+    view.setHtml("<html><body>"
+                 "  <input type='text' id='input1' value='' size='50'/>"
+                 "</body></html>");
+    QTRY_COMPARE(loadFinishedSpy.count(), 1);
+    QCOMPARE(testContext.infos.count(), 0);
+
+    // Set focus on an input field.
+    QPoint textInputCenter = elementCenter(view.page(), "input1");
+    QTest::mouseClick(view.focusProxy(), Qt::LeftButton, 0, textInputCenter);
+    QTRY_COMPARE(testContext.infos.count(), 2);
+    QCOMPARE(evaluateJavaScriptSync(view.page(), "document.activeElement.id").toString(), QStringLiteral("input1"));
+    foreach (const InputMethodInfo &info, testContext.infos) {
+        QCOMPARE(info.cursorPosition, 0);
+        QCOMPARE(info.anchorPosition, 0);
+        QCOMPARE(info.surroundingText, QStringLiteral(""));
+        QCOMPARE(info.selectedText, QStringLiteral(""));
+    }
+    testContext.infos.clear();
+
+    // Change content of an input field from JavaScript.
+    evaluateJavaScriptSync(view.page(), "document.getElementById('input1').value='QtWebEngine';");
+    QTRY_COMPARE(testContext.infos.count(), 1);
+    QCOMPARE(testContext.infos[0].cursorPosition, 11);
+    QCOMPARE(testContext.infos[0].anchorPosition, 11);
+    QCOMPARE(testContext.infos[0].surroundingText, QStringLiteral("QtWebEngine"));
+    QCOMPARE(testContext.infos[0].selectedText, QStringLiteral(""));
+    testContext.infos.clear();
+
+    // Change content of an input field by key press.
+    QTest::keyClick(view.focusProxy(), Qt::Key_Exclam);
+    QTRY_COMPARE(testContext.infos.count(), 1);
+    QCOMPARE(testContext.infos[0].cursorPosition, 12);
+    QCOMPARE(testContext.infos[0].anchorPosition, 12);
+    QCOMPARE(testContext.infos[0].surroundingText, QStringLiteral("QtWebEngine!"));
+    QCOMPARE(testContext.infos[0].selectedText, QStringLiteral(""));
+    testContext.infos.clear();
+
+    // Change cursor position.
+    QTest::keyClick(view.focusProxy(), Qt::Key_Left);
+    QTRY_COMPARE(testContext.infos.count(), 1);
+    QCOMPARE(testContext.infos[0].cursorPosition, 11);
+    QCOMPARE(testContext.infos[0].anchorPosition, 11);
+    QCOMPARE(testContext.infos[0].surroundingText, QStringLiteral("QtWebEngine!"));
+    QCOMPARE(testContext.infos[0].selectedText, QStringLiteral(""));
+    testContext.infos.clear();
+
+    // Selection by IME.
+    {
+        QList<QInputMethodEvent::Attribute> attributes;
+        QInputMethodEvent::Attribute newSelection(QInputMethodEvent::Selection, 2, 12, QVariant());
+        attributes.append(newSelection);
+        QInputMethodEvent event("", attributes);
+        QApplication::sendEvent(view.focusProxy(), &event);
+    }
+    QTRY_COMPARE(testContext.infos.count(), 2);
+    QCOMPARE(selectionChangedSpy.count(), 1);
+
+    // As a first step, Chromium moves the cursor to the start of the selection.
+    // We don't filter this in QtWebEngine because we don't know yet if this is part of a selection.
+    QCOMPARE(testContext.infos[0].cursorPosition, 2);
+    QCOMPARE(testContext.infos[0].anchorPosition, 2);
+    QCOMPARE(testContext.infos[0].surroundingText, QStringLiteral("QtWebEngine!"));
+    QCOMPARE(testContext.infos[0].selectedText, QStringLiteral(""));
+
+    // The update of the selection.
+    QCOMPARE(testContext.infos[1].cursorPosition, 12);
+    QCOMPARE(testContext.infos[1].anchorPosition, 2);
+    QCOMPARE(testContext.infos[1].surroundingText, QStringLiteral("QtWebEngine!"));
+    QCOMPARE(testContext.infos[1].selectedText, QStringLiteral("WebEngine!"));
+    testContext.infos.clear();
+    selectionChangedSpy.clear();
+
+    // Clear selection by IME.
+    {
+        QList<QInputMethodEvent::Attribute> attributes;
+        QInputMethodEvent::Attribute newSelection(QInputMethodEvent::Selection, 0, 0, QVariant());
+        attributes.append(newSelection);
+        QInputMethodEvent event("", attributes);
+        QApplication::sendEvent(view.focusProxy(), &event);
+    }
+    QTRY_COMPARE(testContext.infos.count(), 1);
+    QCOMPARE(selectionChangedSpy.count(), 1);
+    QCOMPARE(testContext.infos[0].cursorPosition, 0);
+    QCOMPARE(testContext.infos[0].anchorPosition, 0);
+    QCOMPARE(testContext.infos[0].surroundingText, QStringLiteral("QtWebEngine!"));
+    QCOMPARE(testContext.infos[0].selectedText, QStringLiteral(""));
+    testContext.infos.clear();
+    selectionChangedSpy.clear();
+
+    // Compose text.
+    {
+        QList<QInputMethodEvent::Attribute> attributes;
+        QInputMethodEvent event("123", attributes);
+        QApplication::sendEvent(view.focusProxy(), &event);
+    }
+    QTRY_COMPARE(testContext.infos.count(), 1);
+    QCOMPARE(testContext.infos[0].cursorPosition, 3);
+    QCOMPARE(testContext.infos[0].anchorPosition, 3);
+    QCOMPARE(testContext.infos[0].surroundingText, QStringLiteral("QtWebEngine!"));
+    QCOMPARE(testContext.infos[0].selectedText, QStringLiteral(""));
+    QCOMPARE(evaluateJavaScriptSync(view.page(), "document.getElementById('input1').value").toString(), QStringLiteral("123QtWebEngine!"));
+    testContext.infos.clear();
+
+    // Cancel composition.
+    {
+        QList<QInputMethodEvent::Attribute> attributes;
+        QInputMethodEvent event("", attributes);
+        QApplication::sendEvent(view.focusProxy(), &event);
+    }
+    QTRY_COMPARE(testContext.infos.count(), 2);
+    foreach (const InputMethodInfo &info, testContext.infos) {
+        QCOMPARE(info.cursorPosition, 0);
+        QCOMPARE(info.anchorPosition, 0);
+        QCOMPARE(info.surroundingText, QStringLiteral("QtWebEngine!"));
+        QCOMPARE(info.selectedText, QStringLiteral(""));
+    }
+    QCOMPARE(evaluateJavaScriptSync(view.page(), "document.getElementById('input1').value").toString(), QStringLiteral("QtWebEngine!"));
+    testContext.infos.clear();
+
+    // Commit text.
+    {
+        QList<QInputMethodEvent::Attribute> attributes;
+        QInputMethodEvent event("", attributes);
+        event.setCommitString(QStringLiteral("123"), 0, 0);
+        QApplication::sendEvent(view.focusProxy(), &event);
+    }
+    QTRY_COMPARE(testContext.infos.count(), 1);
+    QCOMPARE(testContext.infos[0].cursorPosition, 3);
+    QCOMPARE(testContext.infos[0].anchorPosition, 3);
+    QCOMPARE(testContext.infos[0].surroundingText, QStringLiteral("123QtWebEngine!"));
+    QCOMPARE(testContext.infos[0].selectedText, QStringLiteral(""));
+    QCOMPARE(evaluateJavaScriptSync(view.page(), "document.getElementById('input1').value").toString(), QStringLiteral("123QtWebEngine!"));
+    testContext.infos.clear();
+
+    // Focus out.
+    QTest::keyPress(view.focusProxy(), Qt::Key_Tab);
+    QTRY_COMPARE(testContext.infos.count(), 1);
+    QTRY_COMPARE(evaluateJavaScriptSync(view.page(), "document.activeElement.id").toString(), QStringLiteral(""));
+    testContext.infos.clear();
 }
 
 void tst_QWebEngineView::inputMethods()
@@ -2291,6 +2483,48 @@ void tst_QWebEngineView::imeComposition()
     QTRY_COMPARE(view.focusProxy()->inputMethodQuery(Qt::ImAnchorPosition).toInt(), 15);
     QTRY_COMPARE(view.focusProxy()->inputMethodQuery(Qt::ImCurrentSelection).toString(), QString(""));
     QCOMPARE(selectionChangedSpy.count(), 2);
+    selectionChangedSpy.clear();
+
+
+    // 5. Mimic behavior of QtVirtualKeyboard with enabled text prediction.
+    evaluateJavaScriptSync(view.page(), "document.getElementById('input1').value='QtWebEngine';");
+    QTRY_COMPARE(evaluateJavaScriptSync(view.page(), "document.getElementById('input1').value").toString(), QString("QtWebEngine"));
+
+    // Move cursor into position.
+    QTest::keyClick(view.focusProxy(), Qt::Key_Home);
+    for (int j = 0; j < 2; ++j)
+        QTest::keyClick(view.focusProxy(), Qt::Key_Right);
+    QTRY_COMPARE(view.focusProxy()->inputMethodQuery(Qt::ImCursorPosition).toInt(), 2);
+
+    // Turn text into composition by using negative start position.
+    {
+        int replaceFrom = -1 * view.focusProxy()->inputMethodQuery(Qt::ImCursorPosition).toInt();
+        int replaceLength = view.focusProxy()->inputMethodQuery(Qt::ImSurroundingText).toString().size();
+
+        QList<QInputMethodEvent::Attribute> attributes;
+        QInputMethodEvent event("QtWebEngine", attributes);
+        event.setCommitString(QString(), replaceFrom, replaceLength);
+        QApplication::sendEvent(view.focusProxy(), &event);
+    }
+    QTRY_COMPARE(view.focusProxy()->inputMethodQuery(Qt::ImSurroundingText).toString(), QString(""));
+    QCOMPARE(view.focusProxy()->inputMethodQuery(Qt::ImCursorPosition).toInt(), 11);
+    QCOMPARE(view.focusProxy()->inputMethodQuery(Qt::ImAnchorPosition).toInt(), 11);
+    QCOMPARE(view.focusProxy()->inputMethodQuery(Qt::ImCurrentSelection).toString(), QString(""));
+    QCOMPARE(evaluateJavaScriptSync(view.page(), "document.getElementById('input1').value").toString(), QString("QtWebEngine"));
+
+    // Commit.
+    {
+        QList<QInputMethodEvent::Attribute> attributes;
+        QInputMethodEvent event(QString(), attributes);
+        event.setCommitString("QtWebEngine", 0, 0);
+        QApplication::sendEvent(view.focusProxy(), &event);
+    }
+    QTRY_COMPARE(view.focusProxy()->inputMethodQuery(Qt::ImSurroundingText).toString(), QString("QtWebEngine"));
+    QCOMPARE(view.focusProxy()->inputMethodQuery(Qt::ImCursorPosition).toInt(), 11);
+    QCOMPARE(view.focusProxy()->inputMethodQuery(Qt::ImAnchorPosition).toInt(), 11);
+    QCOMPARE(view.focusProxy()->inputMethodQuery(Qt::ImCurrentSelection).toString(), QString(""));
+    QCOMPARE(evaluateJavaScriptSync(view.page(), "document.getElementById('input1').value").toString(), QString("QtWebEngine"));
+    QCOMPARE(selectionChangedSpy.count(), 0);
 }
 
 void tst_QWebEngineView::newlineInTextarea()
@@ -2903,6 +3137,63 @@ void tst_QWebEngineView::deletePage()
     QSignalSpy spy(view.page(), &QWebEnginePage::loadFinished);
     view.page()->load(QStringLiteral("about:blank"));
     QTRY_VERIFY(spy.count());
+}
+
+class TestView : public QWebEngineView {
+    Q_OBJECT
+public:
+    TestView(QWidget *parent = nullptr) : QWebEngineView(parent)
+    {
+    }
+
+    QWebEngineView *createWindow(QWebEnginePage::WebWindowType) override
+    {
+        TestView *view = new TestView(parentWidget());
+        createdWindows.append(view);
+        return view;
+    }
+    QList<TestView *> createdWindows;
+};
+
+void tst_QWebEngineView::closeOpenerTab()
+{
+    QWidget rootWidget;
+    rootWidget.resize(600, 400);
+    auto *testView = new TestView(&rootWidget);
+    testView->settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, true);
+    QSignalSpy loadFinishedSpy(testView, SIGNAL(loadFinished(bool)));
+    testView->setUrl(QStringLiteral("about:blank"));
+    QTRY_VERIFY(loadFinishedSpy.count());
+    testView->page()->runJavaScript(QStringLiteral("window.open('about:blank','_blank')"));
+    QTRY_COMPARE(testView->createdWindows.size(), 1);
+    auto *newView = testView->createdWindows.at(0);
+    newView->show();
+    rootWidget.show();
+    QVERIFY(QTest::qWaitForWindowExposed(newView));
+    QVERIFY(newView->focusProxy()->isVisible());
+    delete testView;
+    QVERIFY(newView->focusProxy()->isVisible());
+}
+
+void tst_QWebEngineView::switchPage()
+{
+      QWebEngineProfile profile;
+      QWebEnginePage page1(&profile);
+      QWebEnginePage page2(&profile);
+      QSignalSpy loadFinishedSpy1(&page1, SIGNAL(loadFinished(bool)));
+      QSignalSpy loadFinishedSpy2(&page2, SIGNAL(loadFinished(bool)));
+      page1.setHtml("<html><body bgcolor=\"#000000\"></body></html>");
+      page2.setHtml("<html><body bgcolor=\"#ffffff\"></body></html>");
+      QTRY_VERIFY(loadFinishedSpy1.count() && loadFinishedSpy2.count());
+      QWebEngineView webView;
+      webView.resize(300,300);
+      webView.show();
+      webView.setPage(&page1);
+      QTRY_COMPARE(webView.grab().toImage().pixelColor(QPoint(150,150)), Qt::black);
+      webView.setPage(&page2);
+      QTRY_COMPARE(webView.grab().toImage().pixelColor(QPoint(150,150)), Qt::white);
+      webView.setPage(&page1);
+      QTRY_COMPARE(webView.grab().toImage().pixelColor(QPoint(150,150)), Qt::black);
 }
 
 QTEST_MAIN(tst_QWebEngineView)

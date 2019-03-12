@@ -488,7 +488,10 @@ void QLineEdit::setClearButtonEnabled(bool enable)
         QAction *clearAction = new QAction(d->clearButtonIcon(), QString(), this);
         clearAction->setEnabled(!isReadOnly());
         clearAction->setObjectName(QLatin1String(clearButtonActionNameC));
-        d->addAction(clearAction, 0, QLineEdit::TrailingPosition, QLineEditPrivate::SideWidgetClearButton | QLineEditPrivate::SideWidgetFadeInWithText);
+
+        int flags = QLineEditPrivate::SideWidgetClearButton | QLineEditPrivate::SideWidgetFadeInWithText;
+        auto widgetAction = d->addAction(clearAction, nullptr, QLineEdit::TrailingPosition, flags);
+        widgetAction->setVisible(!text().isEmpty());
     } else {
         QAction *clearAction = findChild<QAction *>(QLatin1String(clearButtonActionNameC));
         Q_ASSERT(clearAction);
@@ -1678,6 +1681,7 @@ void QLineEdit::mouseDoubleClickEvent(QMouseEvent* e)
 
 /*!
     \fn void QLineEdit::inputRejected()
+    \since 5.12
 
     This signal is emitted when the user presses a key that is not
     considered to be acceptable input. For example, if a key press

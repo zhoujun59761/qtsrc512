@@ -186,7 +186,9 @@
 #include "qsequentialanimationgroup.h"
 #endif
 #include "qset.h"
+#if QT_CONFIG(settings)
 #include "qsettings.h"
+#endif
 #include "qshareddata.h"
 #include "qsharedmemory.h"
 #include "qsharedpointer.h"
@@ -224,7 +226,9 @@
 #include "qtemporarydir.h"
 #include "qtemporaryfile.h"
 #include "qtextboundaryfinder.h"
+#if QT_CONFIG(textcodec)
 #include "qtextcodec.h"
+#endif
 #include "qtextstream.h"
 #include "qthread.h"
 #if QT_CONFIG(thread)

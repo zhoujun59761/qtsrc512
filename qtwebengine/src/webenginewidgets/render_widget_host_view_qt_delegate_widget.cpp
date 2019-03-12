@@ -107,7 +107,6 @@ RenderWidgetHostViewQtDelegateWidget::RenderWidgetHostViewQtDelegateWidget(Rende
     , m_client(client)
     , m_rootItem(new RenderWidgetHostViewQuickItem(client))
     , m_isPopup(false)
-    , m_isPasswordInput(false)
 {
     setFocusPolicy(Qt::StrongFocus);
 
@@ -278,6 +277,7 @@ void RenderWidgetHostViewQtDelegateWidget::show()
 void RenderWidgetHostViewQtDelegateWidget::hide()
 {
     m_rootItem->setVisible(false);
+    QQuickWidget::hide();
 }
 
 bool RenderWidgetHostViewQtDelegateWidget::isVisible() const
@@ -341,14 +341,10 @@ void RenderWidgetHostViewQtDelegateWidget::move(const QPoint &screenPos)
 
 void RenderWidgetHostViewQtDelegateWidget::inputMethodStateChanged(bool editorVisible, bool passwordInput)
 {
-    if (qApp->inputMethod()->isVisible() == editorVisible && m_isPasswordInput == passwordInput)
-        return;
-
     QQuickWidget::setAttribute(Qt::WA_InputMethodEnabled, editorVisible && !passwordInput);
-    m_isPasswordInput = passwordInput;
-
     qApp->inputMethod()->update(Qt::ImQueryInput | Qt::ImEnabled | Qt::ImHints);
-    qApp->inputMethod()->setVisible(editorVisible);
+    if (qApp->inputMethod()->isVisible() != editorVisible)
+        qApp->inputMethod()->setVisible(editorVisible);
 }
 
 void RenderWidgetHostViewQtDelegateWidget::setInputMethodHints(Qt::InputMethodHints hints)
@@ -408,6 +404,15 @@ void RenderWidgetHostViewQtDelegateWidget::hideEvent(QHideEvent *event)
 {
     QQuickWidget::hideEvent(event);
     m_client->notifyHidden();
+}
+
+bool RenderWidgetHostViewQtDelegateWidget::copySurface(const QRect &rect, const QSize &size, QImage &image)
+{
+    QPixmap pixmap = rect.isEmpty() ? QQuickWidget::grab(QQuickWidget::rect()) : QQuickWidget::grab(rect);
+    if (pixmap.isNull())
+        return false;
+    image = pixmap.toImage().scaled(size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    return true;
 }
 
 bool RenderWidgetHostViewQtDelegateWidget::event(QEvent *event)

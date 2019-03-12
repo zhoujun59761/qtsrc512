@@ -181,16 +181,18 @@ ReturnedValue RegExpObject::builtinExec(ExecutionEngine *engine, const String *s
     }
 
     Q_ALLOCA_VAR(uint, matchOffsets, value()->captureCount() * 2 * sizeof(uint));
-    const int result = Scoped<RegExp>(scope, value())->match(s, offset, matchOffsets);
+    const uint result = Scoped<RegExp>(scope, value())->match(s, offset, matchOffsets);
 
     RegExpCtor *regExpCtor = static_cast<RegExpCtor *>(scope.engine->regExpCtor());
     regExpCtor->d()->clearLastMatch();
 
-    if (result == -1) {
+    if (result == JSC::Yarr::offsetNoMatch) {
         if (global() || sticky())
             setLastIndex(0);
         RETURN_RESULT(Encode::null());
     }
+
+    Q_ASSERT(result <= uint(std::numeric_limits<int>::max()));
 
     // fill in result data
     ScopedArrayObject array(scope, scope.engine->newArrayObject(scope.engine->internalClasses(EngineBase::Class_RegExpExecArray)));
@@ -207,7 +209,7 @@ ReturnedValue RegExpObject::builtinExec(ExecutionEngine *engine, const String *s
         array->arrayPut(i, v);
     }
     array->setArrayLengthUnchecked(len);
-    array->setProperty(Index_ArrayIndex, Value::fromInt32(result));
+    array->setProperty(Index_ArrayIndex, Value::fromInt32(int(result)));
     array->setProperty(Index_ArrayInput, *str);
 
     RegExpCtor::Data *dd = regExpCtor->d();
@@ -332,7 +334,13 @@ ReturnedValue RegExpCtor::virtualCallAsConstructor(const FunctionObject *fo, con
         return scope.engine->throwSyntaxError(QStringLiteral("Invalid regular expression"));
     }
 
-    return Encode(scope.engine->newRegExpObject(regexp));
+    ReturnedValue o = Encode(scope.engine->newRegExpObject(regexp));
+
+    if (!newTarget)
+        return o;
+    ScopedObject obj(scope, o);
+    obj->setProtoFromNewTarget(newTarget);
+    return obj->asReturnedValue();
 }
 
 ReturnedValue RegExpCtor::virtualCall(const FunctionObject *f, const Value *, const Value *argv, int argc)

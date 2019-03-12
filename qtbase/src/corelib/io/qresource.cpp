@@ -54,6 +54,7 @@
 #include <qplatformdefs.h>
 #include <qendian.h>
 #include "private/qabstractfileengine_p.h"
+#include "private/qnumeric_p.h"
 #include "private/qsimd_p.h"
 #include "private/qsystemerror_p.h"
 
@@ -1287,7 +1288,6 @@ bool QResourceFileEngine::close()
 {
     Q_D(QResourceFileEngine);
     d->offset = 0;
-    d->uncompressed.clear();
     return true;
 }
 
@@ -1502,12 +1502,25 @@ uchar *QResourceFileEnginePrivate::map(qint64 offset, qint64 size, QFile::Memory
 {
     Q_Q(QResourceFileEngine);
     Q_UNUSED(flags);
-    if (offset < 0 || size <= 0 || !resource.isValid() || offset + size > resource.size()) {
+
+    qint64 max = resource.size();
+    if (resource.isCompressed()) {
+        uncompress();
+        max = uncompressed.size();
+    }
+
+    qint64 end;
+    if (offset < 0 || size <= 0 || !resource.isValid() ||
+            add_overflow(offset, size, &end) || end > max) {
         q->setError(QFile::UnspecifiedError, QString());
         return 0;
     }
-    uchar *address = const_cast<uchar *>(resource.data());
-    return (address + offset);
+
+    const uchar *address = resource.data();
+    if (resource.isCompressed())
+        address = reinterpret_cast<const uchar *>(uncompressed.constData());
+
+    return const_cast<uchar *>(address) + offset;
 }
 
 bool QResourceFileEnginePrivate::unmap(uchar *ptr)

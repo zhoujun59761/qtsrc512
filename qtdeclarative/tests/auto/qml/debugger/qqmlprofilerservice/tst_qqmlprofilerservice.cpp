@@ -69,6 +69,9 @@ public:
     int numLoadedEventTypes() const override;
     void addEventType(const QQmlProfilerEventType &type) override;
     void addEvent(const QQmlProfilerEvent &event) override;
+
+private:
+    qint64 lastTimestamp = -1;
 };
 
 void QQmlProfilerTestClient::startTrace(qint64 timestamp, const QList<int> &engineIds)
@@ -101,6 +104,9 @@ void QQmlProfilerTestClient::addEvent(const QQmlProfilerEvent &event)
     QVERIFY(typeIndex < types.length());
 
     const QQmlProfilerEventType &type = types[typeIndex];
+
+    QVERIFY(event.timestamp() >= lastTimestamp);
+    lastTimestamp = event.timestamp();
 
     switch (type.message()) {
     case Event: {
@@ -225,6 +231,7 @@ private slots:
     void memory();
     void compile();
     void multiEngine();
+    void batchOverflow();
 
 private:
     bool m_recordFromStart = true;
@@ -372,7 +379,7 @@ bool tst_QQmlProfilerService::verify(tst_QQmlProfilerService::MessageListType ty
         return false;
     }
 
-    uint position = expectedPosition;
+    int position = expectedPosition;
     qint64 timestamp = target->at(expectedPosition).timestamp();
     while (position > 0 && target->at(position - 1).timestamp() == timestamp)
         --position;
@@ -447,7 +454,7 @@ bool tst_QQmlProfilerService::verify(tst_QQmlProfilerService::MessageListType ty
         }
 
         return true;
-    } while (target->at(++position).timestamp() == timestamp);
+    } while (++position < target->length() && target->at(position).timestamp() == timestamp);
 
     foreach (const QString &message, warnings)
         qWarning() << message.toLocal8Bit().constData();
@@ -460,7 +467,7 @@ QList<QQmlDebugClient *> tst_QQmlProfilerService::createClients()
     m_client.reset(new QQmlProfilerTestClient(m_connection));
     m_client->client->setRecording(m_recordFromStart);
     m_client->client->setFlushInterval(m_flushInterval);
-    QObject::connect(m_client->client, &QQmlProfilerClient::complete,
+    QObject::connect(m_client->client.data(), &QQmlProfilerClient::complete,
                      this, [this](){ m_isComplete = true; });
     return QList<QQmlDebugClient *>({m_client->client});
 }
@@ -824,6 +831,15 @@ void tst_QQmlProfilerService::multiEngine()
     QCOMPARE(m_process->exitStatus(), QProcess::NormalExit);
 
     QCOMPARE(spy.count(), 1);
+}
+
+void tst_QQmlProfilerService::batchOverflow()
+{
+    // The trace client checks that the events are received in order.
+    QCOMPARE(connect(true, "batchOverflow.qml"), ConnectSuccess);
+    checkProcessTerminated();
+    checkTraceReceived();
+    checkJsHeap();
 }
 
 QTEST_MAIN(tst_QQmlProfilerService)

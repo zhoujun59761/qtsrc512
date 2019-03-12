@@ -755,6 +755,9 @@ void QQmlPrivate::qdeclarativeelement_destructor(QObject *o)
             d->context = nullptr;
         }
 
+        if (d->outerContext && d->outerContext->contextObject == o)
+            d->outerContext->contextObject = nullptr;
+
         // Mark this object as in the process of deletion to
         // prevent it resolving in bindings
         QQmlData::markAsDeleted(o);
@@ -1515,7 +1518,9 @@ void QQmlEngine::setContextForObject(QObject *object, QQmlContext *context)
     }
 
     QQmlContextData *contextData = QQmlContextData::get(context);
-    contextData->addObject(object);
+    Q_ASSERT(data->context == nullptr);
+    data->context = contextData;
+    contextData->addObject(data);
 }
 
 /*!
@@ -1879,6 +1884,8 @@ void QQmlData::destroyed(QObject *object)
         nextContextObject->prevContextObject = prevContextObject;
     if (prevContextObject)
         *prevContextObject = nextContextObject;
+    else if (outerContext && outerContext->contextObjects == this)
+        outerContext->contextObjects = nextContextObject;
 
     QQmlAbstractBinding *binding = bindings;
     while (binding) {

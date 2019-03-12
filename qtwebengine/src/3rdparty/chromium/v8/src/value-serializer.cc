@@ -1144,6 +1144,7 @@ void ValueDeserializer::TransferArrayBuffer(
 }
 
 MaybeHandle<Object> ValueDeserializer::ReadObject() {
+  DisallowJavascriptExecution no_js(isolate_);
   MaybeHandle<Object> result = ReadObjectInternal();
 
   // ArrayBufferView is special in that it consumes the value before it, even
@@ -1468,6 +1469,11 @@ MaybeHandle<JSArray> ValueDeserializer::ReadDenseJSArray() {
     // hole. Past version 11, undefined means undefined.
     if (version_ < 11 && element->IsUndefined(isolate_)) continue;
 
+    // Make sure elements is still large enough.
+    if (i >= static_cast<uint32_t>(elements->length())) {
+      return MaybeHandle<JSArray>();
+    }
+
     elements->set(i, *element);
   }
 
@@ -1589,8 +1595,12 @@ MaybeHandle<JSMap> ValueDeserializer::ReadJSMap() {
     }
 
     Handle<Object> argv[2];
-    if (!ReadObject().ToHandle(&argv[0]) || !ReadObject().ToHandle(&argv[1]) ||
-        Execution::Call(isolate_, map_set, map, arraysize(argv), argv)
+    if (!ReadObject().ToHandle(&argv[0]) || !ReadObject().ToHandle(&argv[1])) {
+      return MaybeHandle<JSMap>();
+    }
+
+    AllowJavascriptExecution allow_js(isolate_);
+    if (Execution::Call(isolate_, map_set, map, arraysize(argv), argv)
             .is_null()) {
       return MaybeHandle<JSMap>();
     }
@@ -1625,8 +1635,10 @@ MaybeHandle<JSSet> ValueDeserializer::ReadJSSet() {
     }
 
     Handle<Object> argv[1];
-    if (!ReadObject().ToHandle(&argv[0]) ||
-        Execution::Call(isolate_, set_add, set, arraysize(argv), argv)
+    if (!ReadObject().ToHandle(&argv[0])) return MaybeHandle<JSSet>();
+
+    AllowJavascriptExecution allow_js(isolate_);
+    if (Execution::Call(isolate_, set_add, set, arraysize(argv), argv)
             .is_null()) {
       return MaybeHandle<JSSet>();
     }
@@ -1975,6 +1987,7 @@ Maybe<uint32_t> ValueDeserializer::ReadJSObjectProperties(
       bool success;
       LookupIterator it = LookupIterator::PropertyOrElement(
           isolate_, object, key, &success, LookupIterator::OWN);
+      CHECK_EQ(LookupIterator::NOT_FOUND, it.state());
       if (!success ||
           JSObject::DefineOwnPropertyIgnoreAttributes(&it, value, NONE)
               .is_null()) {
@@ -2009,6 +2022,7 @@ Maybe<uint32_t> ValueDeserializer::ReadJSObjectProperties(
     bool success;
     LookupIterator it = LookupIterator::PropertyOrElement(
         isolate_, object, key, &success, LookupIterator::OWN);
+    CHECK_EQ(LookupIterator::NOT_FOUND, it.state());
     if (!success ||
         JSObject::DefineOwnPropertyIgnoreAttributes(&it, value, NONE)
             .is_null()) {
@@ -2056,6 +2070,7 @@ static Maybe<bool> SetPropertiesFromKeyValuePairs(Isolate* isolate,
     bool success;
     LookupIterator it = LookupIterator::PropertyOrElement(
         isolate, object, key, &success, LookupIterator::OWN);
+    CHECK_EQ(LookupIterator::NOT_FOUND, it.state());
     if (!success ||
         JSObject::DefineOwnPropertyIgnoreAttributes(&it, value, NONE)
             .is_null()) {

@@ -41,8 +41,6 @@
 #include "qplatformdefs.h"
 #include "qsettings.h"
 
-#ifndef QT_NO_SETTINGS
-
 #include "qsettings_p.h"
 #include "qcache.h"
 #include "qfile.h"
@@ -54,7 +52,7 @@
 #include "qstandardpaths.h"
 #include <qdatastream.h>
 
-#ifndef QT_NO_TEXTCODEC
+#if QT_CONFIG(textcodec)
 #  include "qtextcodec.h"
 #endif
 
@@ -681,7 +679,7 @@ void QSettingsPrivate::iniEscapedString(const QString &str, QByteArray &result, 
             if (ch <= 0x1F || (ch >= 0x7F && !useCodec)) {
                 result += "\\x" + QByteArray::number(ch, 16);
                 escapeNextIfDigit = true;
-#ifndef QT_NO_TEXTCODEC
+#if QT_CONFIG(textcodec)
             } else if (useCodec) {
                 // slow
                 result += codec->fromUnicode(&unicode[i], 1);
@@ -834,7 +832,7 @@ StNormal:
                 ++j;
             }
 
-#ifdef QT_NO_TEXTCODEC
+#if !QT_CONFIG(textcodec)
             Q_UNUSED(codec)
 #else
             if (codec) {
@@ -1601,12 +1599,14 @@ bool QConfFileSettingsPrivate::readIniLine(const QByteArray &data, int &dataPos,
 
     int i = lineStart;
     while (i < dataLen) {
-        while (!(charTraits[uint(uchar(data.at(i)))] & Special)) {
+        char ch = data.at(i);
+        while (!(charTraits[uchar(ch)] & Special)) {
             if (++i == dataLen)
                 goto break_out_of_outer_loop;
+            ch = data.at(i);
         }
 
-        char ch = data.at(i++);
+        ++i;
         if (ch == '=') {
             if (!inQuotes && equalsPos == -1)
                 equalsPos = i - 1;
@@ -1633,8 +1633,9 @@ bool QConfFileSettingsPrivate::readIniLine(const QByteArray &data, int &dataPos,
             Q_ASSERT(ch == ';');
 
             if (i == lineStart + 1) {
-                char ch;
                 while (i < dataLen && (((ch = data.at(i)) != '\n') && ch != '\r'))
+                    ++i;
+                while (i < dataLen && charTraits[uchar(data.at(i))] & Space)
                     ++i;
                 lineStart = i;
             } else if (!inQuotes) {
@@ -1679,7 +1680,7 @@ bool QConfFileSettingsPrivate::readIniFile(const QByteArray &data,
     int sectionPosition = 0;
     bool ok = true;
 
-#ifndef QT_NO_TEXTCODEC
+#if QT_CONFIG(textcodec)
     // detect utf8 BOM
     const uchar *dd = (const uchar *)data.constData();
     if (data.size() >= 3 && dd[0] == 0xef && dd[1] == 0xbb && dd[2] == 0xbf) {
@@ -2835,7 +2836,7 @@ QString QSettings::applicationName() const
     return d->applicationName;
 }
 
-#ifndef QT_NO_TEXTCODEC
+#if QT_CONFIG(textcodec)
 
 /*!
     \since 4.5
@@ -2888,7 +2889,7 @@ QTextCodec *QSettings::iniCodec() const
     return d->iniCodec;
 }
 
-#endif // QT_NO_TEXTCODEC
+#endif // textcodec
 
 /*!
     Returns a status code indicating the first error that was met by
@@ -3584,5 +3585,3 @@ QT_END_NAMESPACE
 #ifndef QT_BOOTSTRAPPED
 #include "moc_qsettings.cpp"
 #endif
-
-#endif // QT_NO_SETTINGS

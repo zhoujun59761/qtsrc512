@@ -2419,7 +2419,7 @@ bool QTest::currentTestFailed()
     Sleeps for \a ms milliseconds, blocking execution of the
     test. qSleep() will not do any event processing and leave your test
     unresponsive. Network communication might time out while
-    sleeping. Use \l qWait() to do non-blocking sleeping.
+    sleeping. Use \l {QTest::qWait()} to do non-blocking sleeping.
 
     \a ms must be greater than 0.
 
@@ -2430,7 +2430,7 @@ bool QTest::currentTestFailed()
     Example:
     \snippet code/src_qtestlib_qtestcase.cpp 23
 
-    \sa qWait()
+    \sa {QTest::qWait()}
 */
 void QTest::qSleep(int ms)
 {
@@ -2484,7 +2484,16 @@ bool QTest::compare_helper(bool success, const char *failureMsg,
 bool QTest::qCompare(float const &t1, float const &t2, const char *actual, const char *expected,
                     const char *file, int line)
 {
-    return compare_helper(qFuzzyCompare(t1, t2), "Compared floats are not the same (fuzzy compare)",
+    bool equal = false;
+    int cl1 = std::fpclassify(t1);
+    int cl2 = std::fpclassify(t2);
+    if (cl1 == FP_INFINITE)
+        equal = ((t1 < 0) == (t2 < 0)) && cl2 == FP_INFINITE;
+    else if (cl1 == FP_NAN)
+        equal = (cl2 == FP_NAN);
+    else
+        equal = qFuzzyCompare(t1, t2);
+    return compare_helper(equal, "Compared floats are not the same (fuzzy compare)",
                           toString(t1), toString(t2), actual, expected, file, line);
 }
 

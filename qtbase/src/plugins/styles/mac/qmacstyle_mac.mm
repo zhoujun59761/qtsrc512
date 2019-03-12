@@ -1512,7 +1512,7 @@ QRectF QMacStylePrivate::CocoaControl::adjustedControlFrame(const QRectF &rect) 
         frameRect = frameRect.translated(rect.topLeft());
         if (type == QMacStylePrivate::Button_PullDown || type == QMacStylePrivate::Button_PopupButton) {
             if (size == QStyleHelper::SizeLarge)
-                frameRect = frameRect.adjusted(0, 0, -6, 0).translated(3, -1);
+                frameRect = frameRect.adjusted(0, 0, -6, 0).translated(3, 0);
             else if (size == QStyleHelper::SizeSmall)
                 frameRect = frameRect.adjusted(0, 0, -4, 0).translated(2, 1);
             else if (size == QStyleHelper::SizeMini)
@@ -2789,6 +2789,9 @@ int QMacStyle::styleHint(StyleHint sh, const QStyleOption *opt, const QWidget *w
     case SH_SpinBox_ButtonsInsideFrame:
         ret = false;
         break;
+    case SH_Table_GridLineColor:
+        ret = int(qt_mac_toQColor(NSColor.gridColor).rgb());
+        break;
     default:
         ret = QCommonStyle::styleHint(sh, opt, w, hret);
         break;
@@ -3226,7 +3229,13 @@ void QMacStyle::drawPrimitive(PrimitiveElement pe, const QStyleOption *opt, QPai
         break;
     case PE_IndicatorTabClose: {
         // Make close button visible only on the hovered tab.
-        if (QTabBar *tabBar = qobject_cast<QTabBar*>(w->parentWidget())) {
+        QTabBar *tabBar = qobject_cast<QTabBar*>(w->parentWidget());
+        if (!tabBar) {
+            // QStyleSheetStyle instead of CloseButton (which has
+            // a QTabBar as a parent widget) uses the QTabBar itself:
+            tabBar = qobject_cast<QTabBar *>(const_cast<QWidget*>(w));
+        }
+        if (tabBar) {
             const bool documentMode = tabBar->documentMode();
             const QTabBarPrivate *tabBarPrivate = static_cast<QTabBarPrivate *>(QObjectPrivate::get(tabBar));
             const int hoveredTabIndex = tabBarPrivate->hoveredTabIndex();

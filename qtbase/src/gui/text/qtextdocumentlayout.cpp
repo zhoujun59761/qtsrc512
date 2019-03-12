@@ -155,7 +155,7 @@ struct QTextLayoutStruct {
     { return pageHeight == 0 ? 0 : (absoluteY() / pageHeight).truncate(); }
 
     inline void newPage()
-    { if (pageHeight == QFIXED_MAX) return; pageBottom += pageHeight; y = pageBottom - pageHeight + pageBottomMargin + pageTopMargin - frameY; }
+    { if (pageHeight == QFIXED_MAX) return; pageBottom += pageHeight; y = qMax(y, pageBottom - pageHeight + pageBottomMargin + pageTopMargin - frameY); }
 };
 
 class QTextTableData : public QTextFrameData
@@ -2709,7 +2709,8 @@ void QTextDocumentLayoutPrivate::layoutBlock(const QTextBlock &bl, int blockPosi
                             qreal(q->paintDevice()->logicalDpiY()) / qreal(qt_defaultDpi()) : 1;
             getLineHeightParams(blockFormat, line, scaling, &lineAdjustment, &lineBreakHeight, &lineHeight, &lineBottom);
 
-            if (layoutStruct->pageHeight > 0 && layoutStruct->absoluteY() + lineBreakHeight > layoutStruct->pageBottom) {
+            while (layoutStruct->pageHeight > 0 && layoutStruct->absoluteY() + lineBreakHeight > layoutStruct->pageBottom &&
+                layoutStruct->pageHeight >= lineBreakHeight) {
                 layoutStruct->newPage();
 
                 floatMargins(layoutStruct->y, layoutStruct, &left, &right);
@@ -3049,18 +3050,12 @@ void QTextDocumentLayout::resizeInlineObject(QTextInlineObject item, int posInDo
     QSizeF inlineSize = (pos == QTextFrameFormat::InFlow ? intrinsic : QSizeF(0, 0));
     item.setWidth(inlineSize.width());
 
-    QFontMetrics m(f.font());
-    switch (f.verticalAlignment())
-    {
-    case QTextCharFormat::AlignMiddle:
-        item.setDescent(inlineSize.height() / 2);
-        item.setAscent(inlineSize.height() / 2);
-        break;
-    case QTextCharFormat::AlignBaseline:
-        item.setDescent(m.descent());
-        item.setAscent(inlineSize.height() - m.descent());
-        break;
-    default:
+    if (f.verticalAlignment() == QTextCharFormat::AlignMiddle) {
+        QFontMetrics m(f.font());
+        qreal halfX = m.xHeight()/2.;
+        item.setAscent((inlineSize.height() + halfX) / 2.);
+        item.setDescent((inlineSize.height() - halfX) / 2.);
+    } else {
         item.setDescent(0);
         item.setAscent(inlineSize.height());
     }
