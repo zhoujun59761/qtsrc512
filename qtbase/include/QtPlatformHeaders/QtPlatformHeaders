@@ -6,6 +6,7 @@
 #include "qeglfsfunctions.h"
 #include "qeglnativecontext.h"
 #include "qglxnativecontext.h"
+#include "qlinuxfbfunctions.h"
 #include "qplatformheaderhelper.h"
 #include "qwaylandwindowfunctions.h"
 #include "qwglnativecontext.h"

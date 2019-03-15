@@ -57,6 +57,7 @@
 #include <QtCore/qdebug.h>
 #include <QtCore/qeventloop.h>
 #include <QtCore/qtextstream.h>
+#include <QtCore/qtimer.h>
 #include <QtGui/qtextdocument.h>
 #include <stdio.h>
 #include <QtGui/QGuiApplication>
@@ -426,7 +427,7 @@ int quick_test_main_with_setup(int argc, char **argv, const char *name, const ch
     }
 #endif
 
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_WINRT)
     if (testPath.isEmpty())
         testPath = QLatin1String(":/");
 #endif
@@ -577,7 +578,10 @@ int quick_test_main_with_setup(int argc, char **argv, const char *name, const ch
                     << "Test '" << QDir::toNativeSeparators(path) << "' window not active after requestActivate().";
             }
             if (view.isExposed()) {
-                QTestRootObject::instance()->setWindowShown(true);
+                // Defer property update until event loop has started
+                QTimer::singleShot(0, []() {
+                    QTestRootObject::instance()->setWindowShown(true);
+                });
             } else {
                 qWarning().nospace()
                     << "Test '" << QDir::toNativeSeparators(path) << "' window was never exposed! "

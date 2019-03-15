@@ -2642,7 +2642,7 @@ void QStyleSheetStyle::setPalette(QWidget *w)
         QRenderRule rule = renderRule(w, PseudoElement_None, map[i].state | extendedPseudoClass(w));
         if (i == 0) {
             if (!w->property("_q_styleSheetWidgetFont").isValid()) {
-                saveWidgetFont(w, w->font());
+                saveWidgetFont(w, w->d_func()->localFont());
             }
             updateStyleSheetFont(w);
             if (ew != w)
@@ -3705,21 +3705,17 @@ void QStyleSheetStyle::drawControl(ControlElement ce, const QStyleOption *opt, Q
                     QRenderRule subSubRule = renderRule(w, opt, PseudoElement_MenuCheckMark);
                     QStyleOptionMenuItem newMi = mi;
                     newMi.rect = positionRect(w, subRule, subSubRule, PseudoElement_MenuCheckMark, opt->rect, opt->direction);
-                    checkableOffset = newMi.rect.width();
+                    // align with icons if there are some
+                    checkableOffset = std::max(m->maxIconWidth, newMi.rect.width());
                     if (subSubRule.hasDrawable() || checked)
                         drawPrimitive(PE_IndicatorMenuCheckMark, &newMi, p, w);
                 }
 
-                int iconOffset = 0;
                 if (!mi.icon.isNull()) {
                     QIcon::Mode mode = dis ? QIcon::Disabled : QIcon::Normal;
                     if (act && !dis)
                         mode = QIcon::Active;
-                    QPixmap pixmap;
-                    if (checked)
-                        pixmap = mi.icon.pixmap(pixelMetric(PM_SmallIconSize), mode, QIcon::On);
-                    else
-                        pixmap = mi.icon.pixmap(pixelMetric(PM_SmallIconSize), mode);
+                    const QPixmap pixmap(mi.icon.pixmap(pixelMetric(PM_SmallIconSize), mode, checked ? QIcon::On : QIcon::Off));
                     const int pixw = pixmap.width() / pixmap.devicePixelRatio();
                     const int pixh = pixmap.height() / pixmap.devicePixelRatio();
                     QRenderRule iconRule = renderRule(w, opt, PseudoElement_MenuIcon);
@@ -3738,15 +3734,20 @@ void QStyleSheetStyle::drawControl(ControlElement ce, const QStyleOption *opt, Q
                     QRect pmr(0, 0, pixw, pixh);
                     pmr.moveCenter(iconRect.center());
                     p->drawPixmap(pmr.topLeft(), pixmap);
-                    iconOffset = iconRule.geo->width;
                 }
 
+                int textOffset = 0;
+                // padding overrules it all
+                if (!subRule.hasBox() || subRule.box()->paddings[LeftEdge] == 0) {
+                    textOffset = checkableOffset;
+                    if (!m->icon.isNull() || !checkable)
+                        textOffset += m->maxIconWidth;
+                }
                 QRect textRect = subRule.contentsRect(opt->rect);
-                if (opt->direction == Qt::LeftToRight)
-                    textRect.setLeft(textRect.left() + checkableOffset + iconOffset);
-                else
-                    textRect.setRight(textRect.right() - checkableOffset - iconOffset);
+                textRect.setLeft(textRect.left() + textOffset);
                 textRect.setWidth(textRect.width() - mi.tabWidth);
+                const QRect vTextRect = visualRect(opt->direction, m->rect, textRect);
+
                 QStringRef s(&mi.text);
                 p->setPen(mi.palette.buttonText().color());
                 if (!s.isEmpty()) {
@@ -3760,7 +3761,7 @@ void QStyleSheetStyle::drawControl(ControlElement ce, const QStyleOption *opt, Q
                         p->drawText(vShortcutRect, text_flags, s.mid(t + 1).toString());
                         s = s.left(t);
                     }
-                    p->drawText(textRect, text_flags, s.left(t).toString());
+                    p->drawText(vTextRect, text_flags, s.left(t).toString());
                 }
 
                 if (mi.menuItemType == QStyleOptionMenuItem::SubMenu) {// draw sub menu arrow
@@ -5084,14 +5085,21 @@ QSize QStyleSheetStyle::sizeFromContents(ContentsType ct, const QStyleOption *op
                 if (mi->text.contains(QLatin1Char('\t')))
                     width += 12; //as in QCommonStyle
                 bool checkable = mi->checkType != QStyleOptionMenuItem::NotCheckable;
+                int checkableWidth = 0;
                 if (checkable) {
                     QRenderRule subSubRule = renderRule(w, opt, PseudoElement_MenuCheckMark);
                     QRect checkmarkRect = positionRect(w, subRule, subSubRule, PseudoElement_MenuCheckMark, opt->rect, opt->direction);
-                    width += checkmarkRect.width();
+                    checkableWidth = std::max(mi->maxIconWidth, checkmarkRect.width());
                 }
                 if (!mi->icon.isNull()) {
                     QPixmap pixmap = mi->icon.pixmap(pixelMetric(PM_SmallIconSize));
                     width += pixmap.width();
+                }
+                // padding overrules it all
+                if (!subRule.hasBox() || subRule.box()->paddings[LeftEdge] == 0) {
+                    width += checkableWidth;
+                    if (!mi->icon.isNull() || !checkable)
+                        width += mi->maxIconWidth;
                 }
                 return subRule.boxSize(subRule.adjustSize(QSize(width, csz.height())));
             }
@@ -6025,7 +6033,7 @@ void QStyleSheetStyle::updateStyleSheetFont(QWidget* w) const
         unsetStyleSheetFont(w);
 
         if (rule.font.resolve()) {
-            QFont wf = w->font();
+            QFont wf = w->d_func()->localFont();
             styleSheetCaches->customFontWidgets.insert(w, {wf, rule.font.resolve()});
 
             QFont font = rule.font.resolve(wf);
@@ -6033,7 +6041,9 @@ void QStyleSheetStyle::updateStyleSheetFont(QWidget* w) const
             w->setFont(font);
         }
     } else {
-        QFont font = rule.font.resolve(w->font());
+        QFont wf = w->d_func()->localFont();
+        QFont font = rule.font.resolve(wf);
+        font.resolve(wf.resolve() | rule.font.resolve());
 
         if ((!w->isWindow() || w->testAttribute(Qt::WA_WindowPropagation))
             && isNaturalChild(w) && qobject_cast<QWidget *>(w->parent())) {
@@ -6041,10 +6051,11 @@ void QStyleSheetStyle::updateStyleSheetFont(QWidget* w) const
             font = font.resolve(static_cast<QWidget *>(w->parent())->font());
         }
 
-        if (w->data->fnt == font)
+        if (wf.resolve() == font.resolve() && wf == font)
             return;
 
         w->data->fnt = font;
+        w->d_func()->directFontResolveMask = font.resolve();
 
         QEvent e(QEvent::FontChange);
         QApplication::sendEvent(w, &e);

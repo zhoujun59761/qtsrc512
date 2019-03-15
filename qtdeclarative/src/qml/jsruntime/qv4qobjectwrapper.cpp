@@ -1144,7 +1144,7 @@ struct CallArgument {
     inline void *dataPtr();
 
     inline void initAsType(int type);
-    inline void fromValue(int type, ExecutionEngine *, const QV4::Value &);
+    inline bool fromValue(int type, ExecutionEngine *, const QV4::Value &);
     inline ReturnedValue toValue(ExecutionEngine *);
 
 private:
@@ -1204,8 +1204,24 @@ static QV4::ReturnedValue CallMethod(const QQmlObjectOrGadget &object, int index
         // Convert all arguments.
         QVarLengthArray<CallArgument, 9> args(argCount + 1);
         args[0].initAsType(returnType);
-        for (int ii = 0; ii < argCount; ++ii)
-            args[ii + 1].fromValue(argTypes[ii], engine, callArgs->args[ii]);
+        for (int ii = 0; ii < argCount; ++ii) {
+            if (!args[ii + 1].fromValue(argTypes[ii], engine, callArgs->args[ii])) {
+                qWarning() << QString::fromLatin1("Could not convert argument %1 at").arg(ii);
+                const StackTrace stack = engine->stackTrace();
+                for (const StackFrame &frame : stack) {
+                    qWarning() << "\t" << frame.function + QLatin1Char('@') + frame.source
+                                    + (frame.line > 0
+                                               ? (QLatin1Char(':') + QString::number(frame.line))
+                                               : QString());
+
+                }
+                qWarning() << QLatin1String("Passing incompatible arguments to C++ functions from "
+                                            "JavaScript is dangerous and deprecated.");
+                qWarning() << QLatin1String("This will throw a JavaScript TypeError in future "
+                                            "releases of Qt!");
+
+            }
+        }
         QVarLengthArray<void *, 9> argData(args.count());
         for (int ii = 0; ii < args.count(); ++ii)
             argData[ii] = args[ii].dataPtr();
@@ -1672,7 +1688,7 @@ void CallArgument::fromContainerValue(const QV4::Object *object, int callType, M
 }
 #endif
 
-void CallArgument::fromValue(int callType, QV4::ExecutionEngine *engine, const QV4::Value &value)
+bool CallArgument::fromValue(int callType, QV4::ExecutionEngine *engine, const QV4::Value &value)
 {
     if (type != 0) {
         cleanup();
@@ -1708,16 +1724,19 @@ void CallArgument::fromValue(int callType, QV4::ExecutionEngine *engine, const Q
         type = callType;
     } else if (callType == QMetaType::QObjectStar) {
         qobjectPtr = nullptr;
+        type = callType;
         if (const QV4::QObjectWrapper *qobjectWrapper = value.as<QV4::QObjectWrapper>())
             qobjectPtr = qobjectWrapper->object();
         else if (const QV4::QQmlTypeWrapper *qmlTypeWrapper = value.as<QV4::QQmlTypeWrapper>())
             queryEngine = qmlTypeWrapper->isSingleton();
-        type = callType;
+        else if (!value.isNull() && !value.isUndefined()) // null and undefined are nullptr
+            return false;
     } else if (callType == qMetaTypeId<QVariant>()) {
         qvariantPtr = new (&allocData) QVariant(scope.engine->toVariant(value, -1));
         type = callType;
     } else if (callType == qMetaTypeId<QList<QObject*> >()) {
         qlistPtr = new (&allocData) QList<QObject *>();
+        type = callType;
         QV4::ScopedArrayObject array(scope, value);
         if (array) {
             Scoped<QV4::QObjectWrapper> qobjectWrapper(scope);
@@ -1731,12 +1750,14 @@ void CallArgument::fromValue(int callType, QV4::ExecutionEngine *engine, const Q
                 qlistPtr->append(o);
             }
         } else {
-            QObject *o = nullptr;
-            if (const QV4::QObjectWrapper *qobjectWrapper = value.as<QV4::QObjectWrapper>())
-                o = qobjectWrapper->object();
-            qlistPtr->append(o);
+            if (const QV4::QObjectWrapper *qobjectWrapper = value.as<QV4::QObjectWrapper>()) {
+                qlistPtr->append(qobjectWrapper->object());
+            } else {
+                qlistPtr->append(nullptr);
+                if (!value.isNull() && !value.isUndefined())
+                    return false;
+            }
         }
-        type = callType;
     } else if (callType == qMetaTypeId<QQmlV4Handle>()) {
         handlePtr = new (&allocData) QQmlV4Handle(value.asReturnedValue());
         type = callType;
@@ -1782,6 +1803,15 @@ void CallArgument::fromValue(int callType, QV4::ExecutionEngine *engine, const Q
             fromContainerValue<std::vector<QModelIndex>>(object, callType, &CallArgument::stdVectorQModelIndexPtr, queryEngine);
         }
 #endif
+    } else if (QMetaType::typeFlags(callType)
+               & (QMetaType::PointerToQObject | QMetaType::PointerToGadget)) {
+        // You can assign null or undefined to any pointer. The result is a nullptr.
+        if (value.isNull() || value.isUndefined()) {
+            qvariantPtr = new (&allocData) QVariant(callType, nullptr);
+            type = callType;
+        } else {
+            queryEngine = true;
+        }
     } else {
         queryEngine = true;
     }
@@ -1803,15 +1833,20 @@ void CallArgument::fromValue(int callType, QV4::ExecutionEngine *engine, const Q
             if (!mo.isNull()) {
                 QObject *obj = ep->toQObject(v);
 
-                if (obj != nullptr && !QQmlMetaObject::canConvert(obj, mo))
-                    obj = nullptr;
+                if (obj != nullptr && !QQmlMetaObject::canConvert(obj, mo)) {
+                    *qvariantPtr = QVariant(callType, nullptr);
+                    return false;
+                }
 
                 *qvariantPtr = QVariant(callType, &obj);
-            } else {
-                *qvariantPtr = QVariant(callType, (void *)nullptr);
+                return true;
             }
+
+            *qvariantPtr = QVariant(callType, (void *)nullptr);
+            return false;
         }
     }
+    return true;
 }
 
 QV4::ReturnedValue CallArgument::toValue(QV4::ExecutionEngine *engine)

@@ -37,12 +37,19 @@
 #include "qquickfusiontheme_p.h"
 
 #include <QtQuickTemplates2/private/qquicktheme_p.h>
+#include <QtQuickControls2/private/qquickstyle_p.h>
 
 QT_BEGIN_NAMESPACE
 
 void QQuickFusionTheme::initialize(QQuickTheme *theme)
 {
-    Q_UNUSED(theme);
+    const bool isDarkSystemTheme = QQuickStylePrivate::isDarkSystemTheme();
+    QPalette systemPalette;
+    systemPalette.setColor(QPalette::Active, QPalette::ButtonText,
+        isDarkSystemTheme ? QColor::fromRgb(0xe7e7e7) : QColor::fromRgb(0x252525));
+    systemPalette.setColor(QPalette::Disabled, QPalette::ButtonText,
+        isDarkSystemTheme ? QColor::fromRgb(0x777777) : QColor::fromRgb(0xb6b6b6));
+    theme->setPalette(QQuickTheme::System, systemPalette);
 }
 
 QT_END_NAMESPACE

@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2017 The Qt Company Ltd.
+** Copyright (C) 2019 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the QtQuick module of the Qt Toolkit.
@@ -129,7 +129,7 @@ bool QQuickTapHandler::wantsEventPoint(QQuickEventPoint *point)
     case QQuickEventPoint::Updated:
         switch (m_gesturePolicy) {
         case DragThreshold:
-            ret = !overThreshold;
+            ret = !overThreshold && parentContains(point);
             break;
         case WithinBounds:
             ret = parentContains(point);
@@ -315,6 +315,8 @@ void QQuickTapHandler::setPressed(bool press, bool cancel, QQuickEventPoint *poi
         if (cancel) {
             emit canceled(point);
             setExclusiveGrab(point, false);
+            // In case there is a filtering parent (Flickable), we should not give up the passive grab,
+            // so that it can continue to filter future events.
             reset();
             emit pointChanged();
         }

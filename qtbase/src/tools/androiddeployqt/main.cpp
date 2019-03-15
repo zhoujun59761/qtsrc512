@@ -43,6 +43,15 @@
 #include <QRegExp>
 
 #include <algorithm>
+
+#ifdef Q_CC_MSVC
+#define popen _popen
+#define QT_POPEN_READ "rb"
+#define pclose _pclose
+#else
+#define QT_POPEN_READ "r"
+#endif
+
 static const bool mustReadOutputAnyway = true; // pclose seems to return the wrong error code unless we read the output
 
 void deleteRecursively(const QString &dirName)
@@ -70,7 +79,7 @@ FILE *openProcess(const QString &command)
     QString processedCommand = command;
 #endif
 
-    return popen(processedCommand.toLocal8Bit().constData(), "r");
+    return popen(processedCommand.toLocal8Bit().constData(), QT_POPEN_READ);
 }
 
 struct QtDependency
@@ -128,6 +137,7 @@ struct Options
     bool build;
     bool gradle;
     bool auxMode;
+    bool stripLibraries = true;
     QTime timer;
 
     // External tools
@@ -146,6 +156,10 @@ struct Options
     QString applicationBinary;
     QString rootPath;
     QStringList qmlImportPaths;
+
+    // Versioning
+    QString versionName;
+    QString versionCode;
 
     // lib c++ path
     QString stdCppPath;
@@ -437,6 +451,8 @@ Options parseOptions()
             options.generateAssetsFileList = false;
         } else if (argument.compare(QLatin1String("--aux-mode"), Qt::CaseInsensitive) == 0) {
             options.auxMode = true;
+        } else if (argument.compare(QLatin1String("--no-strip"), Qt::CaseInsensitive) == 0) {
+            options.stripLibraries = false;
         }
     }
 
@@ -525,6 +541,7 @@ void printHelp()
                     "    --aux-mode: Operate in auxiliary mode. This will only copy the\n"
                     "       dependencies into the build directory and update the XML templates.\n"
                     "       The project will not be built or installed.\n"
+                    "    --no-strip: Do not strip debug symbols from libraries.\n"
                     "    --help: Displays this information.\n\n",
                     qPrintable(QCoreApplication::arguments().at(0))
             );
@@ -753,6 +770,22 @@ bool readInputFile(Options *options)
     }
 
     {
+        const QJsonValue androidVersionName = jsonObject.value(QStringLiteral("android-version-name"));
+        if (!androidVersionName.isUndefined())
+            options->versionName = androidVersionName.toString();
+        else
+            options->versionName = QStringLiteral("1.0");
+    }
+
+    {
+        const QJsonValue androidVersionCode = jsonObject.value(QStringLiteral("android-version-code"));
+        if (!androidVersionCode.isUndefined())
+            options->versionCode = androidVersionCode.toString();
+        else
+            options->versionCode = QStringLiteral("1");
+    }
+
+    {
         const QJsonValue applicationBinary = jsonObject.value(QStringLiteral("application-binary"));
         if (applicationBinary.isUndefined()) {
             fprintf(stderr, "No application binary defined in json file.\n");
@@ -867,7 +900,7 @@ bool readInputFile(Options *options)
             options->extraPlugins = extraPlugins.toString().split(QLatin1Char(','));
     }
 
-    {
+    if (!options->auxMode) {
         const QJsonValue stdcppPath = jsonObject.value(QStringLiteral("stdcpp-path"));
         if (stdcppPath.isUndefined()) {
             fprintf(stderr, "No stdcpp-path defined in json file.\n");
@@ -1320,6 +1353,8 @@ bool updateAndroidManifest(Options &options)
     replacements[QLatin1String("-- %%INSERT_LOCAL_LIBS%% --")] = localLibs.join(QLatin1Char(':'));
     replacements[QLatin1String("-- %%INSERT_LOCAL_JARS%% --")] = options.localJars.join(QLatin1Char(':'));
     replacements[QLatin1String("-- %%INSERT_INIT_CLASSES%% --")] = options.initClasses.join(QLatin1Char(':'));
+    replacements[QLatin1String("-- %%INSERT_VERSION_NAME%% --")] = options.versionName;
+    replacements[QLatin1String("-- %%INSERT_VERSION_CODE%% --")] = options.versionCode;
     replacements[QLatin1String("package=\"org.qtproject.example\"")] = QString::fromLatin1("package=\"%1\"").arg(options.packageName);
     replacements[QLatin1String("-- %%BUNDLE_LOCAL_QT_LIBS%% --")]
             = (options.deploymentMechanism == Options::Bundled) ? QString::fromLatin1("1") : QString::fromLatin1("0");
@@ -1695,7 +1730,7 @@ bool scanImports(Options *options, QSet<QString> *usedDependencies)
             .arg(shellQuote(rootPath))
             .arg(importPaths.join(QLatin1Char(' ')));
 
-    FILE *qmlImportScannerCommand = popen(qmlImportScanner.toLocal8Bit().constData(), "r");
+    FILE *qmlImportScannerCommand = popen(qmlImportScanner.toLocal8Bit().constData(), QT_POPEN_READ);
     if (qmlImportScannerCommand == 0) {
         fprintf(stderr, "Couldn't run qmlimportscanner.\n");
         return false;
@@ -1897,6 +1932,8 @@ bool stripFile(const Options &options, const QString &fileName)
 
 bool stripLibraries(const Options &options)
 {
+    if (!options.stripLibraries)
+        return true;
     if (options.verbose)
         fprintf(stdout, "Stripping libraries to minimize size.\n");
 
@@ -2132,7 +2169,7 @@ bool createAndroidProject(const Options &options)
         if (options.verbose)
             fprintf(stdout, "  -- Command: %s\n", qPrintable(androidTool));
 
-        FILE *androidToolCommand = popen(androidTool.toLocal8Bit().constData(), "r");
+        FILE *androidToolCommand = popen(androidTool.toLocal8Bit().constData(), QT_POPEN_READ);
         if (androidToolCommand == 0) {
             fprintf(stderr, "Cannot run command '%s'\n", qPrintable(androidTool));
             return false;

@@ -201,7 +201,7 @@ Chunk *MemorySegment::allocate(size_t size)
         // chunk allocated for one huge allocation
         Q_ASSERT(availableBytes >= size);
         pageReservation.commit(base, size);
-        allocatedMap = ~static_cast<quintptr>(0);
+        allocatedMap = ~static_cast<quint64>(0);
         return base;
     }
     size_t requiredChunks = (size + sizeof(Chunk) - 1)/sizeof(Chunk);
@@ -973,8 +973,6 @@ void MemoryManager::sweep(bool lastSweep, ClassDestroyStatsCallback classCountPt
         // signal before we start sweeping the heap
         if (QObjectWrapper *qobjectWrapper = (*it).as<QObjectWrapper>())
             qobjectWrapper->destroyObject(lastSweep);
-
-        (*it) = Value::undefinedValue();
     }
 
     // remove objects from weak maps and sets

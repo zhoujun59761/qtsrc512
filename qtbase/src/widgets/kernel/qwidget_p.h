@@ -383,10 +383,11 @@ public:
 
     void updateFont(const QFont &);
     inline void setFont_helper(const QFont &font) {
-        if (data.fnt.resolve() == font.resolve() && data.fnt == font)
+        if (directFontResolveMask == font.resolve() && data.fnt == font)
             return;
         updateFont(font);
     }
+    QFont localFont() const;
     void resolveFont();
     QFont naturalWidgetFont(uint inheritedMask) const;
 
@@ -482,6 +483,7 @@ public:
     void hide_sys();
     void hide_helper();
     void _q_showIfNotHidden();
+    void setVisible(bool);
 
     void setEnabled_helper(bool);
     static void adjustFlags(Qt::WindowFlags &flags, QWidget *w = 0);
@@ -729,6 +731,7 @@ public:
 #endif
 
     // Other variables.
+    uint directFontResolveMask;
     uint inheritedFontResolveMask;
     uint inheritedPaletteResolveMask;
     short leftmargin;

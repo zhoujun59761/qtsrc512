@@ -81,8 +81,8 @@ bool MakefileGenerator::canExecute(const QStringList &cmdline, int *a) const
 
 QString MakefileGenerator::mkdir_p_asstring(const QString &dir, bool escape) const
 {
-    QString edir = escape ? escapeFilePath(Option::fixPathToTargetOS(dir, false, false)) : dir;
-    return "@" + makedir.arg(edir);
+    return "@" + makedir.arg(
+        escape ? escapeFilePath(Option::fixPathToTargetOS(dir, false, false)) : dir);
 }
 
 bool MakefileGenerator::mkdir(const QString &in_path) const
@@ -2585,6 +2585,9 @@ MakefileGenerator::writeSubTargets(QTextStream &t, QList<MakefileGenerator::SubT
 
         { //actually compile
             t << subtarget->target << ":";
+            auto extraDeps = extraSubTargetDependencies();
+            if (!extraDeps.isEmpty())
+                t << " " << valList(extraDeps);
             if(!subtarget->depends.isEmpty())
                 t << " " << valList(subtarget->depends);
             t << " FORCE";
