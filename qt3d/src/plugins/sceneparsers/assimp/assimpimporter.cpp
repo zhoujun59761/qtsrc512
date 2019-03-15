@@ -164,6 +164,7 @@ QMaterial *createBestApproachingMaterial(const aiMaterial *assimpMaterial)
 QString texturePath(const aiString &path)
 {
     QString p = aiStringToQString(path);
+    p.replace(QLatin1String("\\"), QLatin1String("/"));
     if (p.startsWith('/'))
         p.remove(0, 1);
     return p;
@@ -533,6 +534,7 @@ Qt3DCore::QEntity *AssimpImporter::node(aiNode *node)
             entityNode->addComponent(mesh);
         } else {
             QEntity *childEntity = QAbstractNodeFactory::createNode<Qt3DCore::QEntity>("QEntity");
+            childEntity->setObjectName(entityNode->objectName() + QLatin1String("_Child") + QString::number(i));
             if (material)
                 childEntity->addComponent(material);
             childEntity->addComponent(mesh);

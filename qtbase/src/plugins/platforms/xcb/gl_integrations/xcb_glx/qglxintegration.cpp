@@ -48,7 +48,9 @@
 #undef register
 #include <GL/glx.h>
 
-#include <QtCore/QRegularExpression>
+#if QT_CONFIG(regularexpression)
+#  include <QtCore/QRegularExpression>
+#endif
 #include <QtGui/QOpenGLContext>
 #include <QtGui/QOffscreenSurface>
 
@@ -650,6 +652,12 @@ static const char *qglx_threadedgl_blacklist_renderer[] = {
     0
 };
 
+static const char *qglx_threadedgl_blacklist_vendor[] = {
+    "llvmpipe",                             // QTCREATORBUG-10666
+    "nouveau",                              // https://bugs.freedesktop.org/show_bug.cgi?id=91632
+    nullptr
+};
+
 void QGLXContext::queryDummyContext()
 {
     if (m_queriedDummyContext)
@@ -708,6 +716,18 @@ void QGLXContext::queryDummyContext()
             }
         }
     }
+    if (const char *vendor = (const char *) glGetString(GL_VENDOR)) {
+        for (int i = 0; qglx_threadedgl_blacklist_vendor[i]; ++i) {
+            if (strstr(vendor, qglx_threadedgl_blacklist_vendor[i]) != 0) {
+                qCDebug(lcQpaGl).nospace() << "Multithreaded OpenGL disabled: "
+                                              "blacklisted vendor \""
+                                           << qglx_threadedgl_blacklist_vendor[i]
+                                           << "\"";
+                m_supportsThreading = false;
+                break;
+            }
+        }
+    }
 
     if (glxvendor && m_supportsThreading) {
         // Blacklist Mesa drivers due to QTCREATORBUG-10875 (crash in creator),
@@ -722,6 +742,7 @@ void QGLXContext::queryDummyContext()
             // The issue was fixed in Xcb 1.11, but we can't check for that
             // at runtime, so instead assume it fixed with recent Mesa versions
             // released several years after the Xcb fix.
+#if QT_CONFIG(regularexpression)
             QRegularExpression versionTest(QStringLiteral("Mesa (\\d+)"));
             QRegularExpressionMatch result = versionTest.match(QString::fromLatin1(mesaVersionStr));
             int versionNr = 0;
@@ -731,6 +752,7 @@ void QGLXContext::queryDummyContext()
                 // White-listed
                 m_supportsThreading = true;
             }
+#endif
         }
         if (!m_supportsThreading) {
             qCDebug(lcQpaGl).nospace() << "Multithreaded OpenGL disabled: "

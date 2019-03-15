@@ -2404,7 +2404,7 @@ Codegen::Reference Codegen::referenceForName(const QString &name, bool isLhs, co
 
     Reference r = Reference::fromName(this, name);
     r.global = useFastLookups && (resolved.type == Context::ResolvedName::Global);
-    if (!r.global && m_globalNames.contains(name))
+    if (!r.global && canAccelerateGlobalLookups() && m_globalNames.contains(name))
         r.global = true;
     return r;
 }
@@ -3339,7 +3339,6 @@ bool Codegen::visit(ForEachStatement *ast)
 
     BytecodeGenerator::Label in = bytecodeGenerator->newLabel();
     BytecodeGenerator::Label end = bytecodeGenerator->newLabel();
-    BytecodeGenerator::Label done = bytecodeGenerator->newLabel();
 
     {
         auto cleanup = [ast, iterator, iteratorDone, this]() {
@@ -3397,12 +3396,10 @@ bool Codegen::visit(ForEachStatement *ast)
         next.done = iteratorDone.stackSlot();
         bytecodeGenerator->addInstruction(next);
         bytecodeGenerator->addJumpInstruction(Instruction::JumpFalse()).link(body);
-        bytecodeGenerator->jump().link(done);
-
         end.link();
+        // all execution paths need to end up here (normal loop exit, break, and exceptions) in
+        // order to reset the unwind handler, and to close the iterator in calse of an for-of loop.
     }
-
-    done.link();
 
     return false;
 }
@@ -3662,15 +3659,12 @@ void Codegen::handleTryCatch(TryStatement *ast)
 {
     Q_ASSERT(ast);
     RegisterScope scope(this);
-    BytecodeGenerator::Label noException = bytecodeGenerator->newLabel();
     {
         ControlFlowCatch catchFlow(this, ast->catchExpression);
         RegisterScope scope(this);
         TailCallBlocker blockTailCalls(this); // IMPORTANT: destruction will unblock tail calls before catch is generated
         statement(ast->statement);
-        bytecodeGenerator->jump().link(noException);
     }
-    noException.link();
 }
 
 void Codegen::handleTryFinally(TryStatement *ast)

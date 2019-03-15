@@ -99,6 +99,7 @@ public:
     void cancelDownload(quint32 downloadId);
     void pauseDownload(quint32 downloadId);
     void resumeDownload(quint32 downloadId);
+    void removeDownload(quint32 downloadId);
 
     ProfileQt *profile();
 
@@ -152,6 +153,8 @@ public:
 //        NotificationPermission = 2,
         AudioCapturePermission = 3,
         VideoCapturePermission = 4,
+        ClipboardRead = 5,
+        ClipboardWrite = 6,
     };
 
     HttpCacheType httpCacheType() const;

@@ -247,6 +247,7 @@ QWidgetPrivate::QWidgetPrivate(int version)
 #ifndef QT_NO_TOOLTIP
       , toolTipDuration(-1)
 #endif
+      , directFontResolveMask(0)
       , inheritedFontResolveMask(0)
       , inheritedPaletteResolveMask(0)
       , leftmargin(0)
@@ -4508,8 +4509,7 @@ void QWidget::setForegroundRole(QPalette::ColorRole role)
     style, depend on third party APIs to render the content of widgets,
     and these styles typically do not follow the palette. Because of this,
     assigning roles to a widget's palette is not guaranteed to change the
-    appearance of the widget. Instead, you may choose to apply a \l
-    styleSheet.
+    appearance of the widget. Instead, you may choose to apply a \l {styleSheet}.
 
     \warning Do not use this function in conjunction with \l{Qt Style Sheets}.
     When using style sheets, the palette of a widget can be customized using
@@ -4754,6 +4754,18 @@ QFont QWidgetPrivate::naturalWidgetFont(uint inheritedMask) const
 /*!
     \internal
 
+    Returns a font suitable for inheritance, where only locally set attributes are considered resolved.
+*/
+QFont QWidgetPrivate::localFont() const
+{
+    QFont localfont = data.fnt;
+    localfont.resolve(directFontResolveMask);
+    return localfont;
+}
+
+/*!
+    \internal
+
     Determine which font is implicitly imposed on this widget by its ancestors
     and QApplication::font, resolve this against its own font (attributes from
     the implicit font are copied over). Then propagate this font to this
@@ -4762,7 +4774,7 @@ QFont QWidgetPrivate::naturalWidgetFont(uint inheritedMask) const
 void QWidgetPrivate::resolveFont()
 {
     QFont naturalFont = naturalWidgetFont(inheritedFontResolveMask);
-    QFont resolvedFont = data.fnt.resolve(naturalFont);
+    QFont resolvedFont = localFont().resolve(naturalFont);
     setFont_helper(resolvedFont);
 }
 
@@ -4801,6 +4813,11 @@ void QWidgetPrivate::updateFont(const QFont &font)
         inheritedFontResolveMask = 0;
     }
     uint newMask = data.fnt.resolve() | inheritedFontResolveMask;
+    // Set the font as also having resolved inherited traits, so the result of reading QWidget::font()
+    // isn't all weak information, but save the original mask to be able to let new changes on the
+    // parent widget font propagate correctly.
+    directFontResolveMask = data.fnt.resolve();
+    data.fnt.resolve(newMask);
 
     for (int i = 0; i < children.size(); ++i) {
         QWidget *w = qobject_cast<QWidget*>(children.at(i));
@@ -8279,49 +8296,57 @@ void QWidgetPrivate::hide_sys()
     \endlist
 */
 
-
 void QWidget::setVisible(bool visible)
 {
+    if (testAttribute(Qt::WA_WState_ExplicitShowHide) && testAttribute(Qt::WA_WState_Hidden) == !visible)
+        return;
+
+    // Remember that setVisible was called explicitly
+    setAttribute(Qt::WA_WState_ExplicitShowHide);
+
+    Q_D(QWidget);
+    d->setVisible(visible);
+}
+
+// This method is called from QWidgetWindow in response to QWindow::setVisible,
+// and should match the semantics of QWindow::setVisible. QWidget::setVisible on
+// the other hand keeps track of WA_WState_ExplicitShowHide in addition.
+void QWidgetPrivate::setVisible(bool visible)
+{
+    Q_Q(QWidget);
     if (visible) { // show
-        if (testAttribute(Qt::WA_WState_ExplicitShowHide) && !testAttribute(Qt::WA_WState_Hidden))
-            return;
-
-        Q_D(QWidget);
-
         // Designer uses a trick to make grabWidget work without showing
-        if (!isWindow() && parentWidget() && parentWidget()->isVisible()
-            && !parentWidget()->testAttribute(Qt::WA_WState_Created))
-            parentWidget()->window()->d_func()->createRecursively();
+        if (!q->isWindow() && q->parentWidget() && q->parentWidget()->isVisible()
+            && !q->parentWidget()->testAttribute(Qt::WA_WState_Created))
+            q->parentWidget()->window()->d_func()->createRecursively();
 
         //create toplevels but not children of non-visible parents
-        QWidget *pw = parentWidget();
-        if (!testAttribute(Qt::WA_WState_Created)
-            && (isWindow() || pw->testAttribute(Qt::WA_WState_Created))) {
-            create();
+        QWidget *pw = q->parentWidget();
+        if (!q->testAttribute(Qt::WA_WState_Created)
+            && (q->isWindow() || pw->testAttribute(Qt::WA_WState_Created))) {
+            q->create();
         }
 
-        bool wasResized = testAttribute(Qt::WA_Resized);
-        Qt::WindowStates initialWindowState = windowState();
+        bool wasResized = q->testAttribute(Qt::WA_Resized);
+        Qt::WindowStates initialWindowState = q->windowState();
 
         // polish if necessary
-        ensurePolished();
+        q->ensurePolished();
 
-        // remember that show was called explicitly
-        setAttribute(Qt::WA_WState_ExplicitShowHide);
         // whether we need to inform the parent widget immediately
-        bool needUpdateGeometry = !isWindow() && testAttribute(Qt::WA_WState_Hidden);
+        bool needUpdateGeometry = !q->isWindow() && q->testAttribute(Qt::WA_WState_Hidden);
         // we are no longer hidden
-        setAttribute(Qt::WA_WState_Hidden, false);
+        q->setAttribute(Qt::WA_WState_Hidden, false);
 
         if (needUpdateGeometry)
-            d->updateGeometry_helper(true);
+            updateGeometry_helper(true);
 
         // activate our layout before we and our children become visible
-        if (d->layout)
-            d->layout->activate();
+        if (layout)
+            layout->activate();
 
-        if (!isWindow()) {
-            QWidget *parent = parentWidget();
+        if (!q->isWindow()) {
+            QWidget *parent = q->parentWidget();
             while (parent && parent->isVisible() && parent->d_func()->layout  && !parent->data->in_show) {
                 parent->d_func()->layout->activate();
                 if (parent->isWindow())
@@ -8334,30 +8359,28 @@ void QWidget::setVisible(bool visible)
 
         // adjust size if necessary
         if (!wasResized
-            && (isWindow() || !parentWidget()->d_func()->layout))  {
-            if (isWindow()) {
-                adjustSize();
-                if (windowState() != initialWindowState)
-                    setWindowState(initialWindowState);
+            && (q->isWindow() || !q->parentWidget()->d_func()->layout))  {
+            if (q->isWindow()) {
+                q->adjustSize();
+                if (q->windowState() != initialWindowState)
+                    q->setWindowState(initialWindowState);
             } else {
-                adjustSize();
+                q->adjustSize();
             }
-            setAttribute(Qt::WA_Resized, false);
+            q->setAttribute(Qt::WA_Resized, false);
         }
 
-        setAttribute(Qt::WA_KeyboardFocusChange, false);
+        q->setAttribute(Qt::WA_KeyboardFocusChange, false);
 
-        if (isWindow() || parentWidget()->isVisible()) {
-            d->show_helper();
+        if (q->isWindow() || q->parentWidget()->isVisible()) {
+            show_helper();
 
-            qApp->d_func()->sendSyntheticEnterLeave(this);
+            qApp->d_func()->sendSyntheticEnterLeave(q);
         }
 
         QEvent showToParentEvent(QEvent::ShowToParent);
-        QApplication::sendEvent(this, &showToParentEvent);
+        QApplication::sendEvent(q, &showToParentEvent);
     } else { // hide
-        if (testAttribute(Qt::WA_WState_ExplicitShowHide) && testAttribute(Qt::WA_WState_Hidden))
-            return;
 #if 0 // Used to be included in Qt4 for Q_WS_WIN
         // reset WS_DISABLED style in a Blocked window
         if(isWindow() && testAttribute(Qt::WA_WState_Created)
@@ -8368,33 +8391,30 @@ void QWidget::setVisible(bool visible)
             SetWindowLong(winId(), GWL_STYLE, dwStyle);
         }
 #endif
-        if (QApplicationPrivate::hidden_focus_widget == this)
+        if (QApplicationPrivate::hidden_focus_widget == q)
             QApplicationPrivate::hidden_focus_widget = 0;
-
-        Q_D(QWidget);
 
         // hw: The test on getOpaqueRegion() needs to be more intelligent
         // currently it doesn't work if the widget is hidden (the region will
         // be clipped). The real check should be testing the cached region
         // (and dirty flag) directly.
-        if (!isWindow() && parentWidget()) // && !d->getOpaqueRegion().isEmpty())
-            parentWidget()->d_func()->setDirtyOpaqueRegion();
+        if (!q->isWindow() && q->parentWidget()) // && !d->getOpaqueRegion().isEmpty())
+            q->parentWidget()->d_func()->setDirtyOpaqueRegion();
 
-        setAttribute(Qt::WA_WState_Hidden);
-        setAttribute(Qt::WA_WState_ExplicitShowHide);
-        if (testAttribute(Qt::WA_WState_Created))
-            d->hide_helper();
+        q->setAttribute(Qt::WA_WState_Hidden);
+        if (q->testAttribute(Qt::WA_WState_Created))
+            hide_helper();
 
         // invalidate layout similar to updateGeometry()
-        if (!isWindow() && parentWidget()) {
-            if (parentWidget()->d_func()->layout)
-                parentWidget()->d_func()->layout->invalidate();
-            else if (parentWidget()->isVisible())
-                QApplication::postEvent(parentWidget(), new QEvent(QEvent::LayoutRequest));
+        if (!q->isWindow() && q->parentWidget()) {
+            if (q->parentWidget()->d_func()->layout)
+                q->parentWidget()->d_func()->layout->invalidate();
+            else if (q->parentWidget()->isVisible())
+                QApplication::postEvent(q->parentWidget(), new QEvent(QEvent::LayoutRequest));
         }
 
         QEvent hideToParentEvent(QEvent::HideToParent);
-        QApplication::sendEvent(this, &hideToParentEvent);
+        QApplication::sendEvent(q, &hideToParentEvent);
     }
 }
 
@@ -10409,7 +10429,7 @@ bool QWidget::hasHeightForWidth() const
 
     Returns the visible child widget at the position (\a{x}, \a{y})
     in the widget's coordinate system. If there is no visible child
-    widget at the specified position, the function returns 0.
+    widget at the specified position, the function returns \nullptr.
 */
 
 /*!
@@ -12373,7 +12393,7 @@ Q_WIDGETS_EXPORT QWidgetPrivate *qt_widget_private(QWidget *widget)
    \since 4.5
 
    Returns the proxy widget for the corresponding embedded widget in a graphics
-   view; otherwise returns 0.
+   view; otherwise returns \nullptr.
 
    \sa QGraphicsProxyWidget::createProxyForChildWidget(),
        QGraphicsScene::addWidget()

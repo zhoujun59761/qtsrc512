@@ -102,9 +102,10 @@ int LIGHT_COLOR_NAMES[MAX_LIGHTS];
 int LIGHT_INTENSITY_NAMES[MAX_LIGHTS];
 QString LIGHT_STRUCT_NAMES[MAX_LIGHTS];
 
+bool wasInitialized = false;
+
 } // anonymous namespace
 
-bool wasInitialized = false;
 RenderView::StandardUniformsNameToTypeHash RenderView::ms_standardUniformSetters;
 
 
@@ -1060,6 +1061,13 @@ void RenderView::setShaderAndUniforms(RenderCommand *command,
                         setDefaultUniformBlockShaderDataValue(command->m_parameterPack, shader, shaderData, QStringLiteral("envLight"));
                         envLightCount = 1;
                     }
+                } else {
+                    // with some drivers, samplers (like the envbox sampler) need to be bound even though
+                    // they may not be actually used, otherwise draw calls can fail
+                    static const int irradianceId = StringToInt::lookupId(QLatin1String("envLight.irradiance"));
+                    static const int specularId = StringToInt::lookupId(QLatin1String("envLight.specular"));
+                    setUniformValue(command->m_parameterPack, irradianceId, m_renderer->submissionContext()->maxTextureUnitsCount());
+                    setUniformValue(command->m_parameterPack, specularId, m_renderer->submissionContext()->maxTextureUnitsCount());
                 }
                 setUniformValue(command->m_parameterPack, StringToInt::lookupId(QStringLiteral("envLightCount")), envLightCount);
             }

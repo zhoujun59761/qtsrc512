@@ -171,6 +171,8 @@ ProfileIODataQt::~ProfileIODataQt()
 {
     if (content::BrowserThread::IsThreadInitialized(content::BrowserThread::IO))
         DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+    if (m_urlRequestContext && m_urlRequestContext->proxy_resolution_service())
+        m_urlRequestContext->proxy_resolution_service()->OnShutdown();
     m_resourceContext.reset();
     if (m_cookieDelegate)
         m_cookieDelegate->setCookieMonster(0); // this will let CookieMonsterDelegateQt be deleted
@@ -263,6 +265,7 @@ void ProfileIODataQt::generateStorage()
 
     // We must stop all requests before deleting their backends.
     if (m_storage) {
+        m_urlRequestContext->proxy_resolution_service()->OnShutdown();
         m_cookieDelegate->setCookieMonster(nullptr);
         m_storage->set_cookie_store(nullptr);
         cancelAllUrlRequests();
@@ -279,8 +282,17 @@ void ProfileIODataQt::generateStorage()
 
     m_storage->set_cert_verifier(net::CertVerifier::CreateDefault());
     std::unique_ptr<net::MultiLogCTVerifier> ct_verifier(new net::MultiLogCTVerifier());
-//    FIXME:
-//    ct_verifier->AddLogs(net::ct::CreateLogVerifiersForKnownLogs());
+    std::vector<scoped_refptr<const net::CTLogVerifier>> ct_logs;
+    for (const auto &ct_log : certificate_transparency::GetKnownLogs()) {
+        scoped_refptr<const net::CTLogVerifier> log_verifier =
+                net::CTLogVerifier::Create(std::string(ct_log.log_key, ct_log.log_key_length),
+                                           ct_log.log_name,
+                                           ct_log.log_dns_domain);
+        if (!log_verifier)
+            continue;
+        ct_logs.push_back(std::move(log_verifier));
+    }
+    ct_verifier->AddLogs(ct_logs);
     m_storage->set_cert_transparency_verifier(std::move(ct_verifier));
     m_storage->set_ct_policy_enforcer(base::WrapUnique(new net::DefaultCTPolicyEnforcer()));
     m_storage->set_host_resolver(net::HostResolver::CreateDefaultResolver(NULL));

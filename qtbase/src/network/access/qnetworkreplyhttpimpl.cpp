@@ -917,7 +917,7 @@ void QNetworkReplyHttpImplPrivate::postRequest(const QNetworkRequest &newHttpReq
             // From http thread to user thread:
             QObject::connect(forwardUploadDevice, SIGNAL(wantData(qint64)),
                              q, SLOT(wantUploadDataSlot(qint64)));
-            QObject::connect(forwardUploadDevice,SIGNAL(processedData(qint64, qint64)),
+            QObject::connect(forwardUploadDevice,SIGNAL(processedData(qint64,qint64)),
                              q, SLOT(sentUploadDataSlot(qint64,qint64)));
             QObject::connect(forwardUploadDevice, SIGNAL(resetData(bool*)),
                     q, SLOT(resetUploadDataSlot(bool*)),
@@ -1879,11 +1879,9 @@ void QNetworkReplyHttpImplPrivate::_q_startOperation()
 {
     Q_Q(QNetworkReplyHttpImpl);
 
-    // ensure this function is only being called once
-    if (state == Working) {
-        qDebug() << "QNetworkReplyHttpImplPrivate::_q_startOperation was called more than once" << url;
+    if (state == Working) // ensure this function is only being called once
         return;
-    }
+
     state = Working;
 
 #ifndef QT_NO_BEARERMANAGEMENT
