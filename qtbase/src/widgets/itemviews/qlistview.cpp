@@ -1315,8 +1315,8 @@ void QListView::setSelection(const QRect &rect, QItemSelectionModel::SelectionFl
             if (tl.isValid() && br.isValid()
                 && d->isIndexEnabled(tl)
                 && d->isIndexEnabled(br)) {
-                QRect first = rectForIndex(tl);
-                QRect last = rectForIndex(br);
+                QRect first = d->cellRectForIndex(tl);
+                QRect last = d->cellRectForIndex(br);
                 QRect middle;
                 if (d->flow == LeftToRight) {
                     QRect &top = first;
@@ -1895,7 +1895,7 @@ bool QListViewPrivate::dropOn(QDropEvent *event, int *dropRow, int *dropCol, QMo
 
 void QListViewPrivate::removeCurrentAndDisabled(QVector<QModelIndex> *indexes, const QModelIndex &current) const
 {
-    auto isCurrentOrDisabled = [=](const QModelIndex &index) {
+    auto isCurrentOrDisabled = [this, current](const QModelIndex &index) {
         return !isIndexEnabled(index) || index == current;
     };
     indexes->erase(std::remove_if(indexes->begin(), indexes->end(),

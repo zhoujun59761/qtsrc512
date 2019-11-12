@@ -93,6 +93,9 @@ public:
 
     QVector<StateVariant> states() const { return m_states; }
 
+    bool hasStateOfType(StateMask type) const;
+
+
     /**
      * @brief contains - check if this set contains a matching piece of state
      * @param ds

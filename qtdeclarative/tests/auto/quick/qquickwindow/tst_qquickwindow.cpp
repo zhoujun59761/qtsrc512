@@ -353,6 +353,11 @@ protected:
         m_mouseEvents << *event;
     }
 
+    void mouseDoubleClickEvent(QMouseEvent *event) override {
+        qCDebug(lcTests) << event;
+        m_mouseEvents << *event;
+    }
+
 public:
     QList<QMouseEvent> m_mouseEvents;
     QList<QTouchEvent> m_touchEvents;
@@ -401,6 +406,8 @@ private slots:
     void mouseFromTouch_basic();
     void synthMouseFromTouch_data();
     void synthMouseFromTouch();
+    void synthMouseDoubleClickFromTouch_data();
+    void synthMouseDoubleClickFromTouch();
 
     void clearWindow();
 
@@ -1241,6 +1248,55 @@ void tst_qquickwindow::synthMouseFromTouch()
         QCOMPARE(ev.source(), Qt::MouseEventSynthesizedByQt);
 }
 
+void tst_qquickwindow::synthMouseDoubleClickFromTouch_data()
+{
+    QTest::addColumn<QPoint>("movement");
+    QTest::addColumn<QPoint>("distanceBetweenPresses");
+    QTest::addColumn<bool>("expectedSynthesizedDoubleClickEvent");
+
+    QTest::newRow("normal") << QPoint(0, 0) << QPoint(0, 0) << true;
+    QTest::newRow("with 1 pixel wiggle") << QPoint(1, 1) << QPoint(1, 1) << true;
+    QTest::newRow("too much distance to second tap") << QPoint(0, 0) << QPoint(50, 0) << false;
+    QTest::newRow("too much drag") << QPoint(50, 0) << QPoint(0, 0) << false;
+    QTest::newRow("too much drag and too much distance to second tap") << QPoint(50, 0) << QPoint(50, 0) << false;
+}
+
+void tst_qquickwindow::synthMouseDoubleClickFromTouch()
+{
+    QFETCH(QPoint, movement);
+    QFETCH(QPoint, distanceBetweenPresses);
+    QFETCH(bool, expectedSynthesizedDoubleClickEvent);
+
+    QCoreApplication::setAttribute(Qt::AA_SynthesizeMouseForUnhandledTouchEvents, true);
+    QScopedPointer<MouseRecordingWindow> window(new MouseRecordingWindow);
+    QScopedPointer<MouseRecordingItem> item(new MouseRecordingItem(false, nullptr));
+    item->setParentItem(window->contentItem());
+    window->resize(250, 250);
+    window->setPosition(100, 100);
+    window->setTitle(QTest::currentTestFunction());
+    window->show();
+    QVERIFY(QTest::qWaitForWindowActive(window.data()));
+    QTest::qWait(100);
+
+    QPoint p1 = item->mapToScene(item->clipRect().center()).toPoint();
+    QTest::touchEvent(window.data(), touchDevice).press(0, p1, window.data());
+    QTest::touchEvent(window.data(), touchDevice).move(0, p1 + movement, window.data());
+    QTest::touchEvent(window.data(), touchDevice).release(0, p1 + movement, window.data());
+
+    QPoint p2 = p1 + distanceBetweenPresses;
+    QTest::touchEvent(window.data(), touchDevice).press(1, p2, window.data());
+    QTest::touchEvent(window.data(), touchDevice).move(1, p2 + movement, window.data());
+    QTest::touchEvent(window.data(), touchDevice).release(1, p2 + movement, window.data());
+
+    const int eventCount = item->m_mouseEvents.count();
+    QVERIFY(eventCount >= 2);
+
+    const int nDoubleClicks = std::count_if(item->m_mouseEvents.constBegin(), item->m_mouseEvents.constEnd(), [](const QMouseEvent &ev) { return (ev.type() == QEvent::MouseButtonDblClick); } );
+    const bool foundDoubleClick = (nDoubleClicks == 1);
+    QCOMPARE(foundDoubleClick, expectedSynthesizedDoubleClickEvent);
+
+}
+
 void tst_qquickwindow::clearWindow()
 {
     QQuickWindow *window = new QQuickWindow;
@@ -1645,11 +1701,11 @@ void tst_qquickwindow::focusReason()
     window->setTitle(QTest::currentTestFunction());
     QVERIFY(QTest::qWaitForWindowExposed(window));
 
-    QQuickItem *firstItem = new QQuickItem;
+    QScopedPointer<QQuickItem> firstItem(new QQuickItem);
     firstItem->setSize(QSizeF(100, 100));
     firstItem->setParentItem(window->contentItem());
 
-    QQuickItem *secondItem = new QQuickItem;
+    QScopedPointer<QQuickItem> secondItem(new QQuickItem);
     secondItem->setSize(QSizeF(100, 100));
     secondItem->setParentItem(window->contentItem());
 
@@ -1673,7 +1729,7 @@ void tst_qquickwindow::ignoreUnhandledMouseEvents()
     window->show();
     QVERIFY(QTest::qWaitForWindowExposed(window));
 
-    QQuickItem *item = new QQuickItem;
+    QScopedPointer<QQuickItem> item(new QQuickItem);
     item->setSize(QSizeF(100, 100));
     item->setParentItem(window->contentItem());
 
@@ -1883,8 +1939,8 @@ void tst_qquickwindow::hideThenDelete()
     QFETCH(bool, persistentSG);
     QFETCH(bool, persistentGL);
 
-    QSignalSpy *openglDestroyed = nullptr;
-    QSignalSpy *sgInvalidated = nullptr;
+    QScopedPointer<QSignalSpy> openglDestroyed;
+    QScopedPointer<QSignalSpy> sgInvalidated;
 
     {
         QQuickWindow window;
@@ -1903,10 +1959,10 @@ void tst_qquickwindow::hideThenDelete()
         const bool isGL = window.rendererInterface()->graphicsApi() == QSGRendererInterface::OpenGL;
 #if QT_CONFIG(opengl)
         if (isGL)
-            openglDestroyed = new QSignalSpy(window.openglContext(), SIGNAL(aboutToBeDestroyed()));
+            openglDestroyed.reset(new QSignalSpy(window.openglContext(), SIGNAL(aboutToBeDestroyed())));
 #endif
 
-        sgInvalidated = new QSignalSpy(&window, SIGNAL(sceneGraphInvalidated()));
+        sgInvalidated.reset(new QSignalSpy(&window, SIGNAL(sceneGraphInvalidated())));
 
         window.hide();
 
@@ -1951,7 +2007,7 @@ void tst_qquickwindow::showHideAnimate()
     QQmlEngine engine;
     QQmlComponent component(&engine);
     component.loadUrl(testFileUrl("showHideAnimate.qml"));
-    QQuickItem* created = qobject_cast<QQuickItem *>(component.create());
+    QScopedPointer<QQuickItem> created(qobject_cast<QQuickItem *>(component.create()));
 
     QVERIFY(created);
 
@@ -2293,7 +2349,7 @@ void tst_qquickwindow::contentItemSize()
     QQmlEngine engine;
     QQmlComponent component(&engine);
     component.setData(QByteArray("import QtQuick 2.1\n Rectangle { anchors.fill: parent }"), QUrl());
-    QQuickItem *rect = qobject_cast<QQuickItem *>(component.create());
+    QScopedPointer<QQuickItem> rect(qobject_cast<QQuickItem *>(component.create()));
     QVERIFY(rect);
     rect->setParentItem(window.contentItem());
     QCOMPARE(QSizeF(rect->width(), rect->height()), size);

@@ -73,6 +73,7 @@ class DownloadManagerDelegateQt;
 class ProfileQt;
 class UserResourceControllerHost;
 class VisitedLinksManagerQt;
+class WebContentsAdapterClient;
 
 class QWEBENGINECORE_PRIVATE_EXPORT ProfileAdapter : public QObject
 {
@@ -127,6 +128,9 @@ public:
     void setSpellCheckEnabled(bool enabled);
     bool isSpellCheckEnabled() const;
 
+    void addWebContentsAdapterClient(WebContentsAdapterClient *client);
+    void removeWebContentsAdapterClient(WebContentsAdapterClient *client);
+
     // KEEP IN SYNC with API or add mapping layer
     enum HttpCacheType {
         MemoryHttpCache = 0,
@@ -175,7 +179,7 @@ public:
     const QHash<QByteArray, QWebEngineUrlSchemeHandler *> &customUrlSchemeHandlers() const;
     const QList<QByteArray> customUrlSchemes() const;
     void clearCustomUrlSchemeHandlers();
-    void addCustomUrlSchemeHandler(const QByteArray &, QWebEngineUrlSchemeHandler *);
+    bool addCustomUrlSchemeHandler(const QByteArray &, QWebEngineUrlSchemeHandler *);
     bool removeCustomUrlSchemeHandler(QWebEngineUrlSchemeHandler *);
     QWebEngineUrlSchemeHandler *takeCustomUrlSchemeHandler(const QByteArray &);
     UserResourceControllerHost *userResourceController();
@@ -211,6 +215,7 @@ private:
     VisitedLinksPolicy m_visitedLinksPolicy;
     QHash<QByteArray, QWebEngineUrlSchemeHandler *> m_customUrlSchemeHandlers;
     QList<ProfileAdapterClient*> m_clients;
+    QVector<WebContentsAdapterClient *> m_webContentsAdapterClients;
     int m_httpCacheMaxSize;
 
     Q_DISABLE_COPY(ProfileAdapter)

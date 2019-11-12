@@ -161,7 +161,7 @@ void tst_qquickwidget::showHide()
 
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
-    QVERIFY(childView->quickWindow()->isVisible());
+    QVERIFY(!childView->quickWindow()->isVisible()); // this window is always not visible see QTBUG-65761
     QVERIFY(childView->quickWindow()->visibility() != QWindow::Hidden);
 
     window.hide();
@@ -449,9 +449,6 @@ void tst_qquickwidget::reparentToNewWindow()
     qqw->setParent(&window2);
     qqw->show();
 
-    if (QGuiApplication::platformName() == QLatin1String("offscreen"))
-        QEXPECT_FAIL("", "afterRendering not emitted after reparenting on offscreen", Continue);
-
     QTRY_VERIFY(afterRenderingSpy.size() > 0);
 
     QImage img = qqw->grabFramebuffer();
@@ -569,7 +566,10 @@ void tst_qquickwidget::mouseEventWindowPos()
 
     QVERIFY(!rootItem->property("wasClicked").toBool());
     QVERIFY(!rootItem->property("wasDoubleClicked").toBool());
-    QVERIFY(!rootItem->property("wasMoved").toBool());
+    // Moving an item under the mouse cursor will trigger a mouse move event.
+    // The above quick->move() will trigger a mouse move event on macOS.
+    // Discard that in order to get a clean slate for the actual tests.
+    rootItem->setProperty("wasMoved", QVariant(false));
 
     QWindow *window = widget.windowHandle();
     QVERIFY(window);
@@ -609,7 +609,7 @@ void tst_qquickwidget::synthMouseFromTouch()
     childView->resize(300, 300);
     window.show();
     QVERIFY(QTest::qWaitForWindowActive(&window));
-    QVERIFY(childView->quickWindow()->isVisible());
+    QVERIFY(!childView->quickWindow()->isVisible()); // this window is always not visible see QTBUG-65761
     QVERIFY(item->isVisible());
 
     QPoint p1 = QPoint(20, 20);

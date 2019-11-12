@@ -169,7 +169,7 @@ ExecutionEngine::ExecutionEngine(QJSEngine *jsEngine)
         bool ok = false;
         maxCallDepth = qEnvironmentVariableIntValue("QV4_MAX_CALL_DEPTH", &ok);
         if (!ok || maxCallDepth <= 0) {
-#ifdef QT_NO_DEBUG
+#if defined(QT_NO_DEBUG) && !defined(__SANITIZE_ADDRESS__) && !QT_HAS_FEATURE(address_sanitizer)
             maxCallDepth = 1234;
 #else
             // no (tail call) optimization is done, so there'll be a lot mare stack frames active
@@ -464,11 +464,17 @@ ExecutionEngine::ExecutionEngine(QJSEngine *jsEngine)
     jsObjects[TypeError_Ctor] = memoryManager->allocate<TypeErrorCtor>(global);
     jsObjects[URIError_Ctor] = memoryManager->allocate<URIErrorCtor>(global);
     jsObjects[IteratorProto] = memoryManager->allocate<IteratorPrototype>();
-    jsObjects[ForInIteratorProto] = memoryManager->allocObject<ForInIteratorPrototype>(newInternalClass(ForInIteratorPrototype::staticVTable(), iteratorPrototype()));
-    jsObjects[MapIteratorProto] = memoryManager->allocObject<MapIteratorPrototype>(newInternalClass(SetIteratorPrototype::staticVTable(), iteratorPrototype()));
-    jsObjects[SetIteratorProto] = memoryManager->allocObject<SetIteratorPrototype>(newInternalClass(SetIteratorPrototype::staticVTable(), iteratorPrototype()));
-    jsObjects[ArrayIteratorProto] = memoryManager->allocObject<ArrayIteratorPrototype>(newInternalClass(ArrayIteratorPrototype::staticVTable(), iteratorPrototype()));
-    jsObjects[StringIteratorProto] = memoryManager->allocObject<StringIteratorPrototype>(newInternalClass(StringIteratorPrototype::staticVTable(), iteratorPrototype()));
+
+    ic = newInternalClass(ForInIteratorPrototype::staticVTable(), iteratorPrototype());
+    jsObjects[ForInIteratorProto] = memoryManager->allocObject<ForInIteratorPrototype>(ic);
+    ic = newInternalClass(SetIteratorPrototype::staticVTable(), iteratorPrototype());
+    jsObjects[MapIteratorProto] = memoryManager->allocObject<MapIteratorPrototype>(ic);
+    ic = newInternalClass(SetIteratorPrototype::staticVTable(), iteratorPrototype());
+    jsObjects[SetIteratorProto] = memoryManager->allocObject<SetIteratorPrototype>(ic);
+    ic = newInternalClass(ArrayIteratorPrototype::staticVTable(), iteratorPrototype());
+    jsObjects[ArrayIteratorProto] = memoryManager->allocObject<ArrayIteratorPrototype>(ic);
+    ic = newInternalClass(StringIteratorPrototype::staticVTable(), iteratorPrototype());
+    jsObjects[StringIteratorProto] = memoryManager->allocObject<StringIteratorPrototype>(ic);
 
     str = newString(QStringLiteral("get [Symbol.species]"));
     jsObjects[GetSymbolSpecies] = FunctionObject::createBuiltinFunction(this, str, ArrayPrototype::method_get_species, 0);
@@ -1169,6 +1175,14 @@ ReturnedValue ExecutionEngine::throwTypeError(const QString &message)
     return throwError(error);
 }
 
+ReturnedValue ExecutionEngine::throwReferenceError(const QString &name)
+{
+    Scope scope(this);
+    QString msg = name + QLatin1String(" is not defined");
+    ScopedObject error(scope, newReferenceErrorObject(msg));
+    return throwError(error);
+}
+
 ReturnedValue ExecutionEngine::throwReferenceError(const Value &value)
 {
     Scope scope(this);
@@ -1523,6 +1537,10 @@ QV4::ReturnedValue QV4::ExecutionEngine::fromVariant(const QVariant &variant)
             case QMetaType::QLocale:
                 return QQmlLocale::wrap(this, *reinterpret_cast<const QLocale*>(ptr));
 #endif
+            case QMetaType::QPixmap:
+            case QMetaType::QImage:
+                // Scarce value types
+                return QV4::Encode(newVariantObject(variant));
             default:
                 break;
         }

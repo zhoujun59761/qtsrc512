@@ -103,6 +103,7 @@ private slots:
     void offset_data();
     void offset();
     void setCurrentIndex();
+    void setCurrentIndexWrap();
     void resetModel();
     void propertyChanges();
     void pathChanges();
@@ -1137,6 +1138,28 @@ void tst_QQuickPathView::setCurrentIndex()
     QCOMPARE(currentIndexSpy.count(), 1);
 }
 
+void tst_QQuickPathView::setCurrentIndexWrap()
+{
+    QScopedPointer<QQuickView> window(createView());
+    window->setSource(testFileUrl("pathview5.qml"));
+    window->show();
+    qApp->processEvents();
+
+    QQuickPathView *pathview = qobject_cast<QQuickPathView*>(window->rootObject());
+    QVERIFY(pathview);
+
+    // set current index to last item
+    pathview->setCurrentIndex(4);
+    // set currentIndex to first item, then quickly set it back (QTBUG-74508)
+    QSignalSpy currentIndexSpy(pathview, SIGNAL(currentIndexChanged()));
+    QSignalSpy movementStartedSpy(pathview, SIGNAL(movementStarted()));
+    pathview->setCurrentIndex(0);
+    pathview->setCurrentIndex(4);
+    QCOMPARE(pathview->currentIndex(), 4);
+    QCOMPARE(currentIndexSpy.count(), 2);
+    QCOMPARE(movementStartedSpy.count(), 0);
+}
+
 void tst_QQuickPathView::resetModel()
 {
     QScopedPointer<QQuickView> window(createView());
@@ -1467,11 +1490,11 @@ void tst_QQuickPathView::undefinedPath()
 
     // QPainterPath warnings are only received if QT_NO_DEBUG is not defined
     if (QLibraryInfo::isDebugBuild()) {
-        QString warning1("QPainterPath::moveTo: Adding point where x or y is NaN or Inf, ignoring call");
-        QTest::ignoreMessage(QtWarningMsg,qPrintable(warning1));
+        QRegularExpression warning1("^QPainterPath::moveTo:.*ignoring call$");
+        QTest::ignoreMessage(QtWarningMsg, warning1);
 
-        QString warning2("QPainterPath::lineTo: Adding point where x or y is NaN or Inf, ignoring call");
-        QTest::ignoreMessage(QtWarningMsg,qPrintable(warning2));
+        QRegularExpression warning2("^QPainterPath::lineTo:.*ignoring call$");
+        QTest::ignoreMessage(QtWarningMsg, warning2);
     }
 
     QQmlComponent c(&engine, testFileUrl("undefinedpath.qml"));

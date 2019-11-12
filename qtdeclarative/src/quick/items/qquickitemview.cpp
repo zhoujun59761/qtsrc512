@@ -1717,8 +1717,14 @@ void QQuickItemViewPrivate::refill()
 void QQuickItemViewPrivate::refill(qreal from, qreal to)
 {
     Q_Q(QQuickItemView);
-    if (!isValid() || !q->isComponentComplete())
+    if (!model || !model->isValid() || !q->isComponentComplete())
         return;
+    if (!model->count()) {
+        updateHeader();
+        updateFooter();
+        updateViewport();
+        return;
+    }
 
     do {
         bufferPause.stop();
@@ -1839,6 +1845,9 @@ void QQuickItemViewPrivate::layout()
     forceLayout = false;
 
     if (transitioner && transitioner->canTransition(QQuickItemViewTransitioner::PopulateTransition, true)) {
+        // Give the view one more chance to refill itself,
+        // in case its size is changed such that more delegates become visible after component completed
+        refill();
         for (FxViewItem *item : qAsConst(visibleItems)) {
             if (!item->transitionScheduledOrRunning())
                 item->transitionNextReposition(transitioner, QQuickItemViewTransitioner::PopulateTransition, true);
@@ -1874,15 +1883,21 @@ void QQuickItemViewPrivate::layout()
 
         prepareVisibleItemTransitions();
 
-        for (QList<FxViewItem*>::Iterator it = releasePendingTransition.begin();
-             it != releasePendingTransition.end(); ) {
-            FxViewItem *item = *it;
-            if (prepareNonVisibleItemTransition(item, viewBounds)) {
-                ++it;
-            } else {
-                releaseItem(item);
-                it = releasePendingTransition.erase(it);
+        for (auto it = releasePendingTransition.begin(); it != releasePendingTransition.end(); ) {
+            auto old_count = releasePendingTransition.count();
+            auto success = prepareNonVisibleItemTransition(*it, viewBounds);
+            // prepareNonVisibleItemTransition() may invalidate iterators while in fast flicking
+            // invisible animating items are kicked in or out the viewPort
+            // use old_count to test if the abrupt erasure occurs
+            if (old_count > releasePendingTransition.count()) {
+                continue;
             }
+            if (!success) {
+                releaseItem(*it);
+                it = releasePendingTransition.erase(it);
+                continue;
+            }
+            ++it;
         }
 
         for (int i=0; i<visibleItems.count(); i++)
@@ -2225,7 +2240,10 @@ bool QQuickItemViewPrivate::prepareNonVisibleItemTransition(FxViewItem *item, co
     if (item->scheduledTransitionType() == QQuickItemViewTransitioner::MoveTransition)
         repositionItemAt(item, item->index, 0);
 
-    if (item->prepareTransition(transitioner, viewBounds)) {
+    bool success = false;
+    ACTION_IF_DELETED(item, success = item->prepareTransition(transitioner, viewBounds), return success);
+
+    if (success) {
         item->releaseAfterTransition = true;
         return true;
     }

@@ -1470,6 +1470,7 @@ void LayoutTableSection::MarkAllCellsWidthsDirtyAndOrNeedsLayout(
 }
 
 LayoutUnit LayoutTableSection::FirstLineBoxBaseline() const {
+  DCHECK(!NeedsCellRecalc());
   if (!grid_.size())
     return LayoutUnit(-1);
 
@@ -1515,6 +1516,7 @@ void LayoutTableSection::DirtiedRowsAndEffectiveColumns(
     const LayoutRect& damage_rect,
     CellSpan& rows,
     CellSpan& columns) const {
+  DCHECK(!NeedsCellRecalc());
   if (!grid_.size()) {
     rows = CellSpan();
     columns = CellSpan(1, 1);
@@ -1726,6 +1728,7 @@ unsigned LayoutTableSection::NumEffectiveColumns() const {
 LayoutTableCell* LayoutTableSection::OriginatingCellAt(
     unsigned row,
     unsigned effective_column) {
+  SECURITY_CHECK(!needs_cell_recalc_);
   if (effective_column >= NumCols(row))
     return nullptr;
   auto& grid_cell = GridCellAt(row, effective_column);

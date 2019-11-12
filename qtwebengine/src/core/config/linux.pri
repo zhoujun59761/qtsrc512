@@ -1,4 +1,10 @@
 include(common.pri)
+include(functions.pri)
+
+defineReplace(extractCFlag) {
+    return($$qtwebengine_extractCFlag($$1))
+}
+
 QT_FOR_CONFIG += gui-private webenginecore-private
 
 gn_args += \
@@ -10,6 +16,7 @@ gn_args += \
     use_bundled_fontconfig=false \
     use_sysroot=false \
     enable_session_service=false \
+    is_cfi=false \
     toolkit_views=false \
     use_ozone=true \
     ozone_auto_platforms=false \
@@ -168,7 +175,7 @@ host_build {
     }
     !packagesExist(libpci): gn_args += use_libpci=false
 
-    qtConfig(webengine-system-x11): hasX11Dependencies() {
+    qtConfig(webengine-ozone-x11) {
         gn_args += ozone_platform_x11=true
         packagesExist(xscrnsaver): gn_args += use_xscrnsaver=true
     }

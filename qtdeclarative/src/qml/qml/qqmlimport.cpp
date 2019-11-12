@@ -465,9 +465,18 @@ void findCompositeSingletons(const QQmlImportNamespace &set, QList<QQmlImports::
 
         const QQmlDirComponents &components = import->qmlDirComponents;
 
+        const int importMajorVersion = import->majversion;
+        const int importMinorVersion = import->minversion;
+        auto shouldSkipSingleton = [importMajorVersion, importMinorVersion](int singletonMajorVersion, int singletonMinorVersion) -> bool {
+            return importMajorVersion != -1 &&
+                    (singletonMajorVersion > importMajorVersion || (singletonMajorVersion == importMajorVersion && singletonMinorVersion > importMinorVersion));
+        };
+
         ConstIterator cend = components.constEnd();
         for (ConstIterator cit = components.constBegin(); cit != cend; ++cit) {
             if (cit->singleton && excludeBaseUrl(import->url, cit->fileName, baseUrl.toString())) {
+                if (shouldSkipSingleton(cit->majorVersion, cit->minorVersion))
+                    continue;
                 QQmlImports::CompositeSingletonReference ref;
                 ref.typeName = cit->typeName;
                 ref.prefix = set.prefix;
@@ -478,7 +487,9 @@ void findCompositeSingletons(const QQmlImportNamespace &set, QList<QQmlImports::
         }
 
         if (QQmlTypeModule *module = QQmlMetaType::typeModule(import->uri, import->majversion)) {
-            module->walkCompositeSingletons([&resultList, &set](const QQmlType &singleton) {
+            module->walkCompositeSingletons([&resultList, &set, &shouldSkipSingleton](const QQmlType &singleton) {
+                if (shouldSkipSingleton(singleton.majorVersion(), singleton.minorVersion()))
+                    return;
                 QQmlImports::CompositeSingletonReference ref;
                 ref.typeName = singleton.elementName();
                 ref.prefix = set.prefix;
@@ -867,7 +878,7 @@ bool QQmlImportInstance::resolveType(QQmlTypeLoader *typeLoader, const QHashedSt
                     *typeRecursionDetected = true;
             } else {
                 QQmlType returnType = fetchOrCreateTypeForUrl(
-                            qmlUrl, type, registrationType == QQmlType::CompositeSingletonType, nullptr);
+                            qmlUrl, type, registrationType == QQmlType::CompositeSingletonType, errors);
                 if (type_return)
                     *type_return = returnType;
                 return returnType.isValid();
@@ -1331,7 +1342,7 @@ bool QQmlImportsPrivate::locateQmldir(const QString &uri, int vmaj, int vmin, QQ
             QString url;
             const QStringRef absolutePath = absoluteFilePath.leftRef(absoluteFilePath.lastIndexOf(Slash) + 1);
             if (absolutePath.at(0) == Colon)
-                url = QLatin1String("qrc://") + absolutePath.mid(1);
+                url = QLatin1String("qrc") + absolutePath;
             else
                 url = QUrl::fromLocalFile(absolutePath.toString()).toString();
 
@@ -1546,7 +1557,7 @@ bool QQmlImportsPrivate::addFileImport(const QString& uri, const QString &prefix
         QString localFileOrQrc = QQmlFile::urlToLocalFileOrQrc(qmldirUrl);
         Q_ASSERT(!localFileOrQrc.isEmpty());
 
-        QString dir = QQmlFile::urlToLocalFileOrQrc(resolveLocalUrl(base, importUri));
+        const QString dir = localFileOrQrc.left(localFileOrQrc.lastIndexOf(Slash) + 1);
         if (!typeLoader->directoryExists(dir)) {
             if (!isImplicitImport) {
                 QQmlError error;

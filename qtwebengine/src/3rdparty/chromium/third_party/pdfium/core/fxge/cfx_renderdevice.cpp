@@ -35,7 +35,7 @@ void AdjustGlyphSpace(std::vector<FXTEXT_GLYPHPOS>* pGlyphAndPos) {
     return;
 
   for (size_t i = glyphs.size() - 1; i > 1; --i) {
-    FXTEXT_GLYPHPOS& next = glyphs[i];
+    const FXTEXT_GLYPHPOS& next = glyphs[i];
     int next_origin = bVertical ? next.m_Origin.y : next.m_Origin.x;
     float next_origin_f = bVertical ? next.m_fOrigin.y : next.m_fOrigin.x;
 
@@ -44,11 +44,23 @@ void AdjustGlyphSpace(std::vector<FXTEXT_GLYPHPOS>* pGlyphAndPos) {
     float current_origin_f =
         bVertical ? current.m_fOrigin.y : current.m_fOrigin.x;
 
-    int space = next_origin - current_origin;
+    FX_SAFE_INT32 safe_space = next_origin;
+    safe_space -= current_origin;
+    if (!safe_space.IsValid())
+      continue;
+
+    int space = safe_space.ValueOrDie();
     float space_f = next_origin_f - current_origin_f;
     float error = fabs(space_f) - fabs(static_cast<float>(space));
-    if (error > 0.5f)
-      current_origin += space > 0 ? -1 : 1;
+    if (error <= 0.5f)
+      continue;
+
+    FX_SAFE_INT32 safe_origin = current_origin;
+    safe_origin += space > 0 ? -1 : 1;
+    if (!safe_origin.IsValid())
+      continue;
+
+    current_origin = safe_origin.ValueOrDie();
   }
 }
 
@@ -967,10 +979,22 @@ bool CFX_RenderDevice::DrawNormalText(int nChars,
     for (const FXTEXT_GLYPHPOS& glyph : glyphs) {
       if (!glyph.m_pGlyph)
         continue;
+
+      pdfium::base::CheckedNumeric<int> left = glyph.m_Origin.x;
+      left += glyph.m_pGlyph->m_Left;
+      left -= pixel_left;
+      if (!left.IsValid())
+        continue;
+
+      pdfium::base::CheckedNumeric<int> top = glyph.m_Origin.y;
+      top -= glyph.m_pGlyph->m_Top;
+      top -= pixel_top;
+      if (!top.IsValid())
+        continue;
+
       RetainPtr<CFX_DIBitmap> pGlyph = glyph.m_pGlyph->m_pBitmap;
       bitmap->TransferBitmap(
-          glyph.m_Origin.x + glyph.m_pGlyph->m_Left - pixel_left,
-          glyph.m_Origin.y - glyph.m_pGlyph->m_Top - pixel_top,
+          left.ValueOrDie(), top.ValueOrDie(),
           pGlyph->GetWidth(), pGlyph->GetHeight(), pGlyph, 0, 0);
     }
     return SetBitMask(bitmap, bmp_rect.left, bmp_rect.top, fill_color);

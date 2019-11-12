@@ -213,6 +213,16 @@ void BaselineJIT::generate_LoadGlobalLookup(int index)
     as->checkException();
 }
 
+void BaselineJIT::generate_LoadQmlContextPropertyLookup(int index)
+{
+    as->prepareCallWithArgCount(3);
+    as->passInt32AsArg(index, 2);
+    as->passEngineAsArg(1);
+    as->passFunctionAsArg(0);
+    BASELINEJIT_GENERATE_RUNTIME_CALL(Helpers::loadQmlContextPropertyLookup, CallResultDestination::InAccumulator);
+    as->checkException();
+}
+
 void BaselineJIT::generate_StoreNameSloppy(int name)
 {
     STORE_IP();
@@ -337,66 +347,6 @@ void BaselineJIT::generate_StoreSuperProperty(int property)
     as->checkException();
 }
 
-
-void BaselineJIT::generate_StoreScopeObjectProperty(int base, int propertyIndex)
-{
-    STORE_ACC();
-    as->prepareCallWithArgCount(4);
-    as->passAccumulatorAsArg(3);
-    as->passInt32AsArg(propertyIndex, 2);
-    as->passJSSlotAsArg(base, 1);
-    as->passEngineAsArg(0);
-    BASELINEJIT_GENERATE_RUNTIME_CALL(Runtime::method_storeQmlScopeObjectProperty, CallResultDestination::Ignore);
-    as->checkException();
-}
-
-void BaselineJIT::generate_StoreContextObjectProperty(int base, int propertyIndex)
-{
-    STORE_ACC();
-    as->prepareCallWithArgCount(4);
-    as->passAccumulatorAsArg(3);
-    as->passInt32AsArg(propertyIndex, 2);
-    as->passJSSlotAsArg(base, 1);
-    as->passEngineAsArg(0);
-    BASELINEJIT_GENERATE_RUNTIME_CALL(Runtime::method_storeQmlContextObjectProperty, CallResultDestination::Ignore);
-    as->checkException();
-}
-
-void BaselineJIT::generate_LoadScopeObjectProperty(int propertyIndex, int base, int captureRequired)
-{
-    STORE_IP();
-    as->prepareCallWithArgCount(4);
-    as->passInt32AsArg(captureRequired, 3);
-    as->passInt32AsArg(propertyIndex, 2);
-    as->passJSSlotAsArg(base, 1);
-    as->passEngineAsArg(0);
-    BASELINEJIT_GENERATE_RUNTIME_CALL(Runtime::method_loadQmlScopeObjectProperty, CallResultDestination::InAccumulator);
-    as->checkException();
-}
-
-void BaselineJIT::generate_LoadContextObjectProperty(int propertyIndex, int base, int captureRequired)
-{
-    STORE_IP();
-    as->prepareCallWithArgCount(4);
-    as->passInt32AsArg(captureRequired, 3);
-    as->passInt32AsArg(propertyIndex, 2);
-    as->passJSSlotAsArg(base, 1);
-    as->passEngineAsArg(0);
-    BASELINEJIT_GENERATE_RUNTIME_CALL(Runtime::method_loadQmlContextObjectProperty, CallResultDestination::InAccumulator);
-    as->checkException();
-}
-
-void BaselineJIT::generate_LoadIdObject(int index, int base)
-{
-    STORE_IP();
-    as->prepareCallWithArgCount(3);
-    as->passInt32AsArg(index, 2);
-    as->passJSSlotAsArg(base, 1);
-    as->passEngineAsArg(0);
-    BASELINEJIT_GENERATE_RUNTIME_CALL(Runtime::method_loadQmlIdObject, CallResultDestination::InAccumulator);
-    as->checkException();
-}
-
 void BaselineJIT::generate_Yield()
 {
     // #####
@@ -514,32 +464,17 @@ void BaselineJIT::generate_CallGlobalLookup(int index, int argc, int argv)
     as->checkException();
 }
 
-void BaselineJIT::generate_CallScopeObjectProperty(int propIdx, int base, int argc, int argv)
+void BaselineJIT::generate_CallQmlContextPropertyLookup(int index, int argc, int argv)
 {
     STORE_IP();
-    as->prepareCallWithArgCount(5);
-    as->passInt32AsArg(argc, 4);
-    as->passJSSlotAsArg(argv, 3);
-    as->passInt32AsArg(propIdx, 2);
-    as->passJSSlotAsArg(base, 1);
+    as->prepareCallWithArgCount(4);
+    as->passInt32AsArg(argc, 3);
+    as->passJSSlotAsArg(argv, 2);
+    as->passInt32AsArg(index, 1);
     as->passEngineAsArg(0);
-    BASELINEJIT_GENERATE_RUNTIME_CALL(Runtime::method_callQmlScopeObjectProperty, CallResultDestination::InAccumulator);
+    BASELINEJIT_GENERATE_RUNTIME_CALL(Runtime::method_callQmlContextPropertyLookup, CallResultDestination::InAccumulator);
     as->checkException();
 }
-
-void BaselineJIT::generate_CallContextObjectProperty(int propIdx, int base, int argc, int argv)
-{
-    STORE_IP();
-    as->prepareCallWithArgCount(5);
-    as->passInt32AsArg(argc, 4);
-    as->passJSSlotAsArg(argv, 3);
-    as->passInt32AsArg(propIdx, 2);
-    as->passJSSlotAsArg(base, 1);
-    as->passEngineAsArg(0);
-    BASELINEJIT_GENERATE_RUNTIME_CALL(Runtime::method_callQmlContextObjectProperty, CallResultDestination::InAccumulator);
-    as->checkException();
-}
-
 
 void BaselineJIT::generate_CallWithSpread(int func, int thisObject, int argc, int argv)
 {
@@ -959,22 +894,6 @@ void BaselineJIT::generate_Sub(int lhs) { as->sub(lhs); }
 //    as->checkException();
 //}
 
-void BaselineJIT::generate_LoadQmlContext(int result)
-{
-    as->prepareCallWithArgCount(1);
-    as->passEngineAsArg(0);
-    BASELINEJIT_GENERATE_RUNTIME_CALL(Runtime::method_loadQmlContext, CallResultDestination::InAccumulator);
-    as->storeReg(result);
-}
-
-void BaselineJIT::generate_LoadQmlImportedScripts(int result)
-{
-    as->prepareCallWithArgCount(1);
-    as->passEngineAsArg(0);
-    BASELINEJIT_GENERATE_RUNTIME_CALL(Runtime::method_loadQmlImportedScripts, CallResultDestination::InAccumulator);
-    as->storeReg(result);
-}
-
 void BaselineJIT::generate_InitializeBlockDeadTemporalZone(int firstReg, int count)
 {
     as->loadValue(Value::emptyValue().rawValue());
@@ -994,7 +913,6 @@ void BaselineJIT::generate_ThrowOnNullOrUndefined()
 
 void BaselineJIT::generate_GetTemplateObject(int index)
 {
-    STORE_ACC();
     as->prepareCallWithArgCount(2);
     as->passInt32AsArg(index, 1);
     as->passFunctionAsArg(0);

@@ -103,7 +103,7 @@ public:
     static QQmlType qmlType(int typeId, TypeIdCategory category = TypeIdCategory::MetaType);
     static QQmlType qmlType(const QUrl &unNormalizedUrl, bool includeNonFileImports = false);
 
-    static QQmlPropertyCache *propertyCache(const QMetaObject *metaObject);
+    static QQmlPropertyCache *propertyCache(const QMetaObject *metaObject, int minorVersion = -1);
     static QQmlPropertyCache *propertyCache(const QQmlType &type, int minorVersion);
 
     static void freeUnusedTypesAndCaches();
@@ -119,6 +119,8 @@ public:
     static int listType(int);
     static int attachedPropertiesFuncId(QQmlEnginePrivate *engine, const QMetaObject *);
     static QQmlAttachedPropertiesFunc attachedPropertiesFuncById(QQmlEnginePrivate *, int);
+    static QQmlAttachedPropertiesFunc attachedPropertiesFunc(QQmlEnginePrivate *,
+                                                             const QMetaObject *);
 
     enum TypeCategory { Unknown, Object, List };
     static TypeCategory typeCategory(int);

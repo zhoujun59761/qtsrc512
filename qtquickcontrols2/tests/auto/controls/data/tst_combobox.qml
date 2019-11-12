@@ -85,6 +85,56 @@ TestCase {
         MouseArea { }
     }
 
+    Component {
+        id: customPopup
+        Popup {
+            width: 100
+            implicitHeight: contentItem.implicitHeight
+            contentItem: TextInput {
+                anchors.fill: parent
+            }
+        }
+    }
+
+    Component {
+        id: comboBoxWithShaderEffect
+        ComboBox {
+            delegate: Rectangle {
+                Text {
+                    id: txt
+                    anchors.centerIn: parent
+                    text: "item" + index
+                    font.pixelSize: 20
+                    color: "red"
+                }
+                id: rect
+                objectName: "rect"
+                width: parent.width
+                height: txt.implicitHeight
+                gradient: Gradient {
+                    GradientStop { color: "lightsteelblue"; position: 0.0 }
+                    GradientStop { color: "blue"; position: 1.0 }
+                }
+                layer.enabled: true
+                layer.effect: ShaderEffect {
+                    objectName: "ShaderFX"
+                    width: rect.width
+                    height: rect.height
+                    fragmentShader: "
+                            uniform lowp sampler2D source; // this item
+                            uniform lowp float qt_Opacity; // inherited opacity of this item
+                            varying highp vec2 qt_TexCoord0;
+                            void main() {
+                                lowp vec4 p = texture2D(source, qt_TexCoord0);
+                                lowp float g = dot(p.xyz, vec3(0.344, 0.5, 0.156));
+                                gl_FragColor = vec4(g, g, g, p.a) * qt_Opacity;
+                            }"
+
+                }
+            }
+        }
+    }
+
     function init() {
         // QTBUG-61225: Move the mouse away to avoid QQuickWindowPrivate::flushFrameSynchronousEvents()
         // delivering interfering hover events based on the last mouse position from earlier tests. For
@@ -1679,5 +1729,64 @@ TestCase {
         keyRelease(data.key)
         compare(container.releasedKeys, ++releasedKeys)
         compare(container.lastReleasedKey, data.key)
+    }
+
+    function test_popupFocus_QTBUG_74661() {
+        var control = createTemporaryObject(comboBox, testCase)
+        verify(control)
+
+        var popup = createTemporaryObject(customPopup, testCase)
+        verify(popup)
+
+        control.popup = popup
+
+        var openedSpy = signalSpy.createObject(control, {target: popup, signalName: "opened"})
+        verify(openedSpy.valid)
+
+        var closedSpy = signalSpy.createObject(control, {target: popup, signalName: "closed"})
+        verify(closedSpy.valid)
+
+        control.forceActiveFocus()
+        verify(control.activeFocus)
+
+        // show popup
+        keyClick(Qt.Key_Space)
+        openedSpy.wait()
+        compare(openedSpy.count, 1)
+
+        popup.contentItem.forceActiveFocus()
+        verify(popup.contentItem.activeFocus)
+
+        // type something in the text field
+        keyClick(Qt.Key_Space)
+        keyClick(Qt.Key_H)
+        keyClick(Qt.Key_I)
+        compare(popup.contentItem.text, " hi")
+
+        compare(closedSpy.count, 0)
+
+        // hide popup
+        keyClick(Qt.Key_Escape)
+        closedSpy.wait()
+        compare(closedSpy.count, 1)
+    }
+
+    function test_comboBoxWithShaderEffect() {
+        var control = createTemporaryObject(comboBoxWithShaderEffect, testCase, {model: 9})
+        verify(control)
+        waitForRendering(control)
+        control.forceActiveFocus()
+        var openedSpy = signalSpy.createObject(control, {target: control.popup, signalName: "opened"})
+        verify(openedSpy.valid)
+
+        var closedSpy = signalSpy.createObject(control, {target: control.popup, signalName: "closed"})
+        verify(closedSpy.valid)
+
+        control.popup.open()
+        openedSpy.wait()
+        compare(openedSpy.count, 1)
+        control.popup.close()
+        closedSpy.wait()
+        compare(closedSpy.count, 1)
     }
 }

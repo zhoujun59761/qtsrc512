@@ -299,6 +299,9 @@ private slots:
     void retrieveQmlTypeId();
 
     void polymorphicFunctionLookup();
+    void anchorsToParentInPropertyChanges();
+
+    void typeWrapperToVariant();
 
 private:
     QQmlEngine engine;
@@ -360,7 +363,7 @@ private:
             } \
             file.close(); \
         } else { \
-            QCOMPARE(expected, actual); \
+            QCOMPARE(actual, expected); \
         } \
     }
 
@@ -611,6 +614,10 @@ void tst_qqmllanguage::errors_data()
 
     QTest::newRow("badCompositeRegistration.1") << "badCompositeRegistration.1.qml" << "badCompositeRegistration.1.errors.txt" << false;
     QTest::newRow("badCompositeRegistration.2") << "badCompositeRegistration.2.qml" << "badCompositeRegistration.2.errors.txt" << false;
+    QTest::newRow("cyclicAlias") << "cyclicAlias.qml" << "cyclicAlias.errors.txt" << false;
+
+    QTest::newRow("fuzzed.1") << "fuzzed.1.qml" << "fuzzed.1.errors.txt" << false;
+    QTest::newRow("fuzzed.2") << "fuzzed.2.qml" << "fuzzed.2.errors.txt" << false;
 }
 
 
@@ -621,6 +628,7 @@ void tst_qqmllanguage::errors()
     QFETCH(bool, create);
 
     QQmlComponent component(&engine, testFileUrl(file));
+    QTRY_VERIFY(!component.isLoading());
 
     QScopedPointer<QObject> object;
 
@@ -5020,6 +5028,8 @@ void tst_qqmllanguage::thisInQmlScope()
     QVERIFY(!o.isNull());
     QCOMPARE(o->property("x"), QVariant(42));
     QCOMPARE(o->property("y"), QVariant(42));
+    QCOMPARE(o->property("a"), QVariant(42));
+    QCOMPARE(o->property("b"), QVariant(42));
 }
 
 void tst_qqmllanguage::valueTypeGroupPropertiesInBehavior()
@@ -5065,6 +5075,29 @@ void tst_qqmllanguage::polymorphicFunctionLookup()
     QVERIFY(!o.isNull());
 
     QVERIFY(o->property("ok").toBool());
+}
+
+void tst_qqmllanguage::anchorsToParentInPropertyChanges()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("anchorsToParentInPropertyChagnes.qml"));
+    VERIFY_ERRORS(0);
+    QScopedPointer<QObject> o(component.create());
+    QVERIFY(!o.isNull());
+    QTRY_COMPARE(o->property("edgeWidth").toInt(), 200);
+}
+
+void tst_qqmllanguage::typeWrapperToVariant()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("typeWrapperToVariant.qml"));
+    VERIFY_ERRORS(0);
+    QScopedPointer<QObject> o(component.create());
+    QVERIFY(!o.isNull());
+    QObject *connections = qvariant_cast<QObject *>(o->property("connections"));
+    QVERIFY(connections);
+    QObject *target = qvariant_cast<QObject *>(connections->property("target"));
+    QVERIFY(target);
 }
 
 QTEST_MAIN(tst_qqmllanguage)

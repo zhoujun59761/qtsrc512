@@ -235,6 +235,10 @@ private slots:
     void importModuleWithLexicallyScopedVars();
     void importExportErrors();
 
+    void equality();
+    void aggressiveGc();
+    void noAccumulatorInTemplateLiteral();
+
 public:
     Q_INVOKABLE QJSValue throwingCppMethod1();
     Q_INVOKABLE void throwingCppMethod2();
@@ -4424,6 +4428,34 @@ void tst_QJSEngine::stringReplace()
     val = engine.evaluate("'x'.replace(/()()()()()()()()()(x)/, '$10')");
     QVERIFY(val.isString());
     QCOMPARE(val.toString(), QString("x"));
+
+    val = engine.evaluate("'123'.replace(/\\.0*$|(\\.\\d*[1-9])(0+)$/, '$1')");
+    QVERIFY(val.isString());
+    QCOMPARE(val.toString(), QString("123"));
+
+    val = engine.evaluate("'123.00'.replace(/\\.0*$|(\\.\\d*[1-9])(0+)$/, '$1')");
+    QVERIFY(val.isString());
+    QCOMPARE(val.toString(), QString("123"));
+
+    val = engine.evaluate("'123.0'.replace(/\\.0*$|(\\.\\d*[1-9])(0+)$/, '$1')");
+    QVERIFY(val.isString());
+    QCOMPARE(val.toString(), QString("123"));
+
+    val = engine.evaluate("'123.'.replace(/\\.0*$|(\\.\\d*[1-9])(0+)$/, '$1')");
+    QVERIFY(val.isString());
+    QCOMPARE(val.toString(), QString("123"));
+
+    val = engine.evaluate("'123.50'.replace(/\\.0*$|(\\.\\d*[1-9])(0+)$/, '$1')");
+    QVERIFY(val.isString());
+    QCOMPARE(val.toString(), QString("123.5"));
+
+    val = engine.evaluate("'123.05'.replace(/\\.0*$|(\\.\\d*[1-9])(0+)$/, '$1')");
+    QVERIFY(val.isString());
+    QCOMPARE(val.toString(), QString("123.05"));
+
+    val = engine.evaluate("'0.050'.replace(/\\.0*$|(\\.\\d*[1-9])(0+)$/, '$1')");
+    QVERIFY(val.isString());
+    QCOMPARE(val.toString(), QString("0.05"));
 }
 
 void tst_QJSEngine::protoChanges_QTBUG68369()
@@ -4620,6 +4652,43 @@ void tst_QJSEngine::importExportErrors()
         QVERIFY(result.isError());
         QCOMPARE(result.property("lineNumber").toInt(), 2);
     }
+}
+
+void tst_QJSEngine::equality()
+{
+    QJSEngine engine;
+    QJSValue ok = engine.evaluate("(0 < 0) ? 'ko' : 'ok'");
+    QVERIFY(ok.isString());
+    QCOMPARE(ok.toString(), QString("ok"));
+}
+
+void tst_QJSEngine::aggressiveGc()
+{
+    const QByteArray origAggressiveGc = qgetenv("QV4_MM_AGGRESSIVE_GC");
+    qputenv("QV4_MM_AGGRESSIVE_GC", "true");
+    {
+        QJSEngine engine; // ctor crashes if core allocation methods don't properly scope things.
+        QJSValue obj = engine.newObject();
+        QVERIFY(obj.isObject());
+    }
+    qputenv("QV4_MM_AGGRESSIVE_GC", origAggressiveGc);
+}
+
+void tst_QJSEngine::noAccumulatorInTemplateLiteral()
+{
+    const QByteArray origAggressiveGc = qgetenv("QV4_MM_AGGRESSIVE_GC");
+    qputenv("QV4_MM_AGGRESSIVE_GC", "true");
+    {
+        QJSEngine engine;
+
+        // getTemplateLiteral should not save the accumulator as it's garbage and trashes
+        // the next GC run. Instead, we want to see the stack overflow error.
+        QJSValue value = engine.evaluate("function a(){\nS=o=>s\nFunction``\na()}a()");
+
+        QVERIFY(value.isError());
+        QCOMPARE(value.toString(), "RangeError: Maximum call stack size exceeded.");
+    }
+    qputenv("QV4_MM_AGGRESSIVE_GC", origAggressiveGc);
 }
 
 QTEST_MAIN(tst_QJSEngine)

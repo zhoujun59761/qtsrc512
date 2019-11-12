@@ -40,6 +40,9 @@
 
 #include <QtQml/qqmlinfo.h>
 #include <QtQuick/private/qquickflickable_p.h>
+#if QT_CONFIG(accessibility)
+#include <QtQuick/private/qquickaccessibleattached_p.h>
+#endif
 
 QT_BEGIN_NAMESPACE
 
@@ -129,7 +132,7 @@ QT_BEGIN_NAMESPACE
 
     It is possible to create an instance of ScrollBar without using the
     attached property API. This is useful when the behavior of the attached
-    scoll bar is not sufficient or a \l Flickable is not in use. In the
+    scroll bar is not sufficient or a \l Flickable is not in use. In the
     following example, horizontal and vertical scroll bars are used to
     scroll over the text without using \l Flickable:
 
@@ -724,8 +727,19 @@ void QQuickScrollBar::accessibilityActiveChanged(bool active)
     QQuickControl::accessibilityActiveChanged(active);
 
     Q_D(QQuickScrollBar);
-    if (active)
+    if (active) {
         setAccessibleProperty("pressed", d->pressed);
+
+        if (QQuickAccessibleAttached *accessibleAttached = QQuickControlPrivate::accessibleAttached(this)) {
+            connect(accessibleAttached, &QQuickAccessibleAttached::increaseAction, this, &QQuickScrollBar::increase);
+            connect(accessibleAttached, &QQuickAccessibleAttached::decreaseAction, this, &QQuickScrollBar::decrease);
+        }
+    } else {
+        if (QQuickAccessibleAttached *accessibleAttached = QQuickControlPrivate::accessibleAttached(this)) {
+            disconnect(accessibleAttached, &QQuickAccessibleAttached::increaseAction, this, &QQuickScrollBar::increase);
+            disconnect(accessibleAttached, &QQuickAccessibleAttached::decreaseAction, this, &QQuickScrollBar::decrease);
+        }
+    }
 }
 
 QAccessible::Role QQuickScrollBar::accessibleRole() const

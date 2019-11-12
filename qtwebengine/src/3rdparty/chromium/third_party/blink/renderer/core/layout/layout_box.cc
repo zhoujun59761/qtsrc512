@@ -1568,7 +1568,14 @@ bool LayoutBox::NodeAtPoint(HitTestResult& result,
   // Now hit test ourselves.
   if (should_hit_test_self &&
       VisibleToHitTestRequest(result.GetHitTestRequest())) {
-    LayoutRect bounds_rect(adjusted_location, Size());
+    LayoutRect bounds_rect;
+    if (result.GetHitTestRequest().GetType() &
+        HitTestRequest::kHitTestVisualOverflow) {
+      bounds_rect = VisualOverflowRect();
+    } else {
+      bounds_rect = BorderBoxRect();
+    }
+    bounds_rect.Move(ToSize(adjusted_location));
     if (location_in_container.Intersects(bounds_rect)) {
       UpdateHitTestResult(result,
                           FlipForWritingMode(location_in_container.Point() -
@@ -4953,6 +4960,13 @@ bool LayoutBox::ShrinkToAvoidFloats() const {
     if (containing_block->IsLayoutNGMixin())
       return false;
   }
+
+  // Legends are taken out of the normal flow, and are laid out at the very
+  // start of the fieldset, and are therefore not affected by floats (that may
+  // appear earlier in the DOM).
+  if (IsRenderedLegend())
+    return false;
+
   return true;
 }
 

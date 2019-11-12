@@ -168,7 +168,7 @@ QT_BEGIN_NAMESPACE
 
     This signal is emitted when the \uicontrol Return or \uicontrol Enter key is pressed
     on an \l editable combo box. If the confirmed string is not currently in the model,
-    the \l currentIndex will be set to \c -1 and the \c currentText will be updated
+    the \l currentIndex will be set to \c -1 and the \l currentText will be updated
     accordingly.
 
     \note If there is a \l validator set on the combo box, the signal will only be
@@ -923,7 +923,7 @@ void QQuickComboBox::setCurrentIndex(int index)
 
     This property holds the text of the current item in the combo box.
 
-    \sa currentIndex, displayText, textRole
+    \sa currentIndex, displayText, textRole, editText
 */
 QString QQuickComboBox::currentText() const
 {
@@ -1266,7 +1266,7 @@ void QQuickComboBox::setEditable(bool editable)
 
     This property holds the text in the text field of an editable combo box.
 
-    \sa editable
+    \sa editable, currentText, displayText
 */
 QString QQuickComboBox::editText() const
 {
@@ -1556,8 +1556,13 @@ bool QQuickComboBox::eventFilter(QObject *object, QEvent *event)
         break;
     }
     case QEvent::FocusOut:
-        d->hidePopup(false);
-        setPressed(false);
+        if (qGuiApp->focusObject() != this && (!d->popup || !d->popup->hasActiveFocus())) {
+            // Only close the popup if focus was transferred somewhere else
+            // than to the popup or the popup button (which normally means that
+            // the user clicked on the popup button to open it, not close it).
+            d->hidePopup(false);
+            setPressed(false);
+        }
         break;
 #if QT_CONFIG(im)
     case QEvent::InputMethod:
@@ -1583,8 +1588,14 @@ void QQuickComboBox::focusOutEvent(QFocusEvent *event)
 {
     Q_D(QQuickComboBox);
     QQuickControl::focusOutEvent(event);
-    d->hidePopup(false);
-    setPressed(false);
+
+    if (qGuiApp->focusObject() != d->contentItem && (!d->popup || !d->popup->hasActiveFocus())) {
+        // Only close the popup if focus was transferred
+        // somewhere else than to the popup or the inner line edit (which is
+        // normally done from QQuickComboBox::focusInEvent).
+        d->hidePopup(false);
+        setPressed(false);
+    }
 }
 
 #if QT_CONFIG(im)

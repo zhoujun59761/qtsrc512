@@ -163,10 +163,12 @@ static void updateFormatFromContext(QSurfaceFormat &format)
         format.setOption(QSurfaceFormat::StereoBuffers);
 
     if (format.renderableType() == QSurfaceFormat::OpenGL) {
-        GLint value = 0;
-        glGetIntegerv(GL_RESET_NOTIFICATION_STRATEGY_ARB, &value);
-        if (value == GL_LOSE_CONTEXT_ON_RESET_ARB)
-            format.setOption(QSurfaceFormat::ResetNotification);
+        if (format.version() >= qMakePair(4, 0)) {
+            GLint value = 0;
+            glGetIntegerv(GL_RESET_NOTIFICATION_STRATEGY_ARB, &value);
+            if (value == GL_LOSE_CONTEXT_ON_RESET_ARB)
+                format.setOption(QSurfaceFormat::ResetNotification);
+        }
 
         if (format.version() < qMakePair(3, 0)) {
             format.setOption(QSurfaceFormat::DeprecatedFunctions);
@@ -175,7 +177,7 @@ static void updateFormatFromContext(QSurfaceFormat &format)
 
         // Version 3.0 onwards - check if it includes deprecated functionality or is
         // a debug context
-        value = 0;
+        GLint value = 0;
         glGetIntegerv(GL_CONTEXT_FLAGS, &value);
         if (!(value & GL_CONTEXT_FLAG_FORWARD_COMPATIBLE_BIT))
             format.setOption(QSurfaceFormat::DeprecatedFunctions);
@@ -204,7 +206,6 @@ QGLXContext::QGLXContext(QXcbScreen *screen, const QSurfaceFormat &format, QPlat
     , m_shareContext(0)
     , m_format(format)
     , m_isPBufferCurrent(false)
-    , m_swapInterval(-1)
     , m_ownsContext(nativeHandle.isNull())
     , m_getGraphicsResetStatus(0)
     , m_lost(false)
@@ -270,7 +271,9 @@ void QGLXContext::init(QXcbScreen *screen, QPlatformOpenGLContext *share)
                 // ES does not support any format option
                 m_format.setOptions(QSurfaceFormat::FormatOptions());
             }
-
+            // Robustness must match that of the shared context.
+            if (share && share->format().testOption(QSurfaceFormat::ResetNotification))
+                m_format.setOption(QSurfaceFormat::ResetNotification);
             Q_ASSERT(glVersions.count() > 0);
 
             for (int i = 0; !m_context && i < glVersions.count(); i++) {
@@ -565,9 +568,9 @@ bool QGLXContext::makeCurrent(QPlatformSurface *surface)
 
     if (success && surfaceClass == QSurface::Window) {
         int interval = surface->format().swapInterval();
+        QXcbWindow *window = static_cast<QXcbWindow *>(surface);
         QXcbScreen *screen = screenForPlatformSurface(surface);
-        if (interval >= 0 && m_swapInterval != interval && screen) {
-            m_swapInterval = interval;
+        if (interval >= 0 && interval != window->swapInterval() && screen) {
             typedef void (*qt_glXSwapIntervalEXT)(Display *, GLXDrawable, int);
             typedef void (*qt_glXSwapIntervalMESA)(unsigned int);
             static qt_glXSwapIntervalEXT glXSwapIntervalEXT = 0;
@@ -586,6 +589,7 @@ bool QGLXContext::makeCurrent(QPlatformSurface *surface)
                 glXSwapIntervalEXT(m_display, glxDrawable, interval);
             else if (glXSwapIntervalMESA)
                 glXSwapIntervalMESA(interval);
+            window->setSwapInterval(interval);
         }
     }
 

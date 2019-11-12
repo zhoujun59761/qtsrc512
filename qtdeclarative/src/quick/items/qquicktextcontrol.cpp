@@ -1297,6 +1297,7 @@ void QQuickTextControlPrivate::inputMethodEvent(QInputMethodEvent *e)
             || e->preeditString() != cursor.block().layout()->preeditAreaText()
             || e->replacementLength() > 0;
     bool forceSelectionChanged = false;
+    int oldCursorPos = cursor.position();
 
     cursor.beginEditBlock();
     if (isGettingInput) {
@@ -1365,6 +1366,8 @@ void QQuickTextControlPrivate::inputMethodEvent(QInputMethodEvent *e)
     QTextCursorPrivate *cursor_d = QTextCursorPrivate::getPrivate(&cursor);
     if (cursor_d)
         cursor_d->setX();
+    if (cursor.position() != oldCursorPos)
+        emit q->cursorPositionChanged();
     q->updateCursorRectangle(oldPreeditCursor != preeditCursor || forceSelectionChanged || isGettingInput);
     selectionChanged(forceSelectionChanged);
 }
@@ -1400,7 +1403,7 @@ QVariant QQuickTextControl::inputMethodQuery(Qt::InputMethodQuery property, QVar
     case Qt::ImAnchorPosition:
         return QVariant(d->cursor.anchor() - block.position());
     case Qt::ImAbsolutePosition:
-        return QVariant(d->cursor.anchor());
+        return QVariant(d->cursor.position());
     case Qt::ImTextAfterCursor:
     {
         int maxLength = argument.isValid() ? argument.toInt() : 1024;

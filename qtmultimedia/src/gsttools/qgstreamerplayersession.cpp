@@ -47,7 +47,7 @@
 #include <private/gstvideoconnector_p.h>
 #endif
 #include <private/qgstutils_p.h>
-#include <private/qgstutils_p.h>
+#include <private/qvideosurfacegstsink_p.h>
 
 #include <gst/gstvalue.h>
 #include <gst/base/gstbasesrc.h>
@@ -60,9 +60,10 @@
 #include <QtCore/qdebug.h>
 #include <QtCore/qdir.h>
 #include <QtCore/qstandardpaths.h>
+#include <qvideorenderercontrol.h>
+#include <QUrlQuery>
 
 //#define DEBUG_PLAYBIN
-//#define DEBUG_VO_BIN_DUMP
 
 QT_BEGIN_NAMESPACE
 
@@ -305,7 +306,7 @@ void QGstreamerPlayerSession::loadFromStream(const QNetworkRequest &request, QIO
         m_appSrc = new QGstAppSrc(this);
     m_appSrc->setStream(appSrcStream);
 
-    if (m_playbin) {
+    if (!parsePipeline() && m_playbin) {
         m_tags.clear();
         emit tagsChanged();
 
@@ -337,23 +338,7 @@ void QGstreamerPlayerSession::loadFromUri(const QNetworkRequest &request)
     }
 #endif
 
-    if (m_request.url().scheme() == QLatin1String("gst-pipeline")) {
-        QString url = m_request.url().toString(QUrl::RemoveScheme);
-        QString pipeline = QUrl::fromPercentEncoding(url.toLatin1().constData());
-        GError *err = nullptr;
-        GstElement *element = gst_parse_launch(pipeline.toLatin1().constData(), &err);
-        if (err) {
-            auto errstr = QLatin1String(err->message);
-            qWarning() << "Error:" << pipeline << ":" << errstr;
-            emit error(QMediaPlayer::FormatError, errstr);
-            g_clear_error(&err);
-        }
-
-        setPipeline(element);
-        return;
-    }
-
-    if (m_playbin) {
+    if (!parsePipeline() && m_playbin) {
         m_tags.clear();
         emit tagsChanged();
 
@@ -368,17 +353,61 @@ void QGstreamerPlayerSession::loadFromUri(const QNetworkRequest &request)
     }
 }
 
-void QGstreamerPlayerSession::setPipeline(GstElement *pipeline)
+bool QGstreamerPlayerSession::parsePipeline()
+{
+    if (m_request.url().scheme() != QLatin1String("gst-pipeline"))
+        return false;
+
+    // Set current surface to video sink before creating a pipeline.
+    auto renderer = qobject_cast<QVideoRendererControl *>(m_videoOutput);
+    if (renderer)
+        QVideoSurfaceGstSink::setSurface(renderer->surface());
+
+    QString url = m_request.url().toString(QUrl::RemoveScheme);
+    QString desc = QUrl::fromPercentEncoding(url.toLatin1().constData());
+    GError *err = nullptr;
+    GstElement *pipeline = gst_parse_launch(desc.toLatin1().constData(), &err);
+    if (err) {
+        auto errstr = QLatin1String(err->message);
+        qWarning() << "Error:" << desc << ":" << errstr;
+        emit error(QMediaPlayer::FormatError, errstr);
+        g_clear_error(&err);
+    }
+
+    return setPipeline(pipeline);
+}
+
+static void gst_foreach(GstIterator *it, const std::function<bool(GstElement *)> &cmp)
+{
+#if GST_CHECK_VERSION(1,0,0)
+    GValue value = G_VALUE_INIT;
+    while (gst_iterator_next (it, &value) == GST_ITERATOR_OK) {
+        auto child = static_cast<GstElement*>(g_value_get_object(&value));
+#else
+    GstElement *child = nullptr;
+    while (gst_iterator_next(it, reinterpret_cast<gpointer *>(&child)) == GST_ITERATOR_OK) {
+#endif
+        if (cmp(child))
+            break;
+    }
+
+    gst_iterator_free(it);
+#if GST_CHECK_VERSION(1,0,0)
+    g_value_unset(&value);
+#endif
+}
+
+bool QGstreamerPlayerSession::setPipeline(GstElement *pipeline)
 {
     GstBus *bus = pipeline ? gst_element_get_bus(pipeline) : nullptr;
     if (!bus)
-        return;
+        return false;
 
     gst_object_unref(GST_OBJECT(m_pipeline));
     m_pipeline = pipeline;
     gst_object_unref(GST_OBJECT(m_bus));
     m_bus = bus;
-    delete m_busHelper;
+    m_busHelper->deleteLater();
     m_busHelper = new QGstreamerBusHelper(m_bus, this);
     m_busHelper->installMessageFilter(this);
 
@@ -395,19 +424,31 @@ void QGstreamerPlayerSession::setPipeline(GstElement *pipeline)
     m_videoIdentity = nullptr;
 
     if (m_renderer) {
-        auto it = gst_bin_iterate_sinks(GST_BIN(pipeline));
-        GValue data = { 0, 0 };
-        while (gst_iterator_next (it, &data) == GST_ITERATOR_OK) {
-            auto child = static_cast<GstElement*>(g_value_get_object(&data));
-            if (QLatin1String(GST_OBJECT_NAME(child)) == QLatin1String("qtvideosink")) {
-                m_renderer->setVideoSink(child);
-                break;
-            }
-        }
-        gst_iterator_free(it);
+        gst_foreach(gst_bin_iterate_sinks(GST_BIN(pipeline)),
+            [this](GstElement *child) {
+                if (qstrcmp(GST_OBJECT_NAME(child), "qtvideosink") == 0) {
+                    m_renderer->setVideoSink(child);
+                    return true;
+                }
+                return false;
+            });
     }
 
+#if QT_CONFIG(gstreamer_app)
+    if (m_appSrc) {
+        gst_foreach(gst_bin_iterate_sources(GST_BIN(pipeline)),
+            [this](GstElement *child) {
+                if (qstrcmp(qt_gst_element_get_factory_name(child), "appsrc") == 0) {
+                    m_appSrc->setup(child);
+                    return true;
+                }
+                return false;
+            });
+    }
+#endif
+
     emit pipelineChanged();
+    return true;
 }
 
 qint64 QGstreamerPlayerSession::duration() const
@@ -617,12 +658,6 @@ void QGstreamerPlayerSession::setVideoRenderer(QObject *videoOutput)
     // No sense to continue if custom pipeline requested.
     if (!m_playbin)
         return;
-
-#ifdef DEBUG_VO_BIN_DUMP
-    gst_debug_bin_to_dot_file_with_ts(GST_BIN(m_playbin),
-                                  GstDebugGraphDetails(GST_DEBUG_GRAPH_SHOW_ALL /* GST_DEBUG_GRAPH_SHOW_MEDIA_TYPE | GST_DEBUG_GRAPH_SHOW_NON_DEFAULT_PARAMS | GST_DEBUG_GRAPH_SHOW_STATES*/),
-                                  "playbin_set");
-#endif
 
     GstElement *videoSink = 0;
     if (m_renderer && m_renderer->isReady())
@@ -884,11 +919,6 @@ void QGstreamerPlayerSession::finishVideoOutputChange()
 
     gst_object_unref(GST_OBJECT(srcPad));
 
-#ifdef DEBUG_VO_BIN_DUMP
-    gst_debug_bin_to_dot_file_with_ts(GST_BIN(m_playbin),
-                                  GstDebugGraphDetails(GST_DEBUG_GRAPH_SHOW_ALL /* | GST_DEBUG_GRAPH_SHOW_MEDIA_TYPE | GST_DEBUG_GRAPH_SHOW_NON_DEFAULT_PARAMS | GST_DEBUG_GRAPH_SHOW_STATES */),
-                                  "playbin_finish");
-#endif
 }
 
 #if !GST_CHECK_VERSION(1,0,0)
@@ -951,6 +981,11 @@ bool QGstreamerPlayerSession::isSeekable() const
 
 bool QGstreamerPlayerSession::play()
 {
+#if GST_CHECK_VERSION(1,0,0)
+    static bool dumpDot = qEnvironmentVariableIsSet("GST_DEBUG_DUMP_DOT_DIR");
+    if (dumpDot)
+        gst_debug_bin_to_dot_file_with_ts(GST_BIN(m_pipeline), GstDebugGraphDetails(GST_DEBUG_GRAPH_SHOW_ALL), "gst.play");
+#endif
 #ifdef DEBUG_PLAYBIN
     qDebug() << Q_FUNC_INFO;
 #endif
@@ -1626,6 +1661,14 @@ void QGstreamerPlayerSession::playbinNotifySource(GObject *o, GParamSpec *p, gpo
         self->m_sourceType = UDPSrc;
         //The udpsrc is always a live source.
         self->m_isLiveSource = true;
+
+        QUrlQuery query(self->m_request.url());
+        const QString var = QLatin1String("udpsrc.caps");
+        if (query.hasQueryItem(var)) {
+            GstCaps *caps = gst_caps_from_string(query.queryItemValue(var).toLatin1().constData());
+            g_object_set(G_OBJECT(source), "caps", caps, NULL);
+            gst_caps_unref(caps);
+        }
     } else if (qstrcmp(G_OBJECT_CLASS_NAME(G_OBJECT_GET_CLASS(source)), "GstSoupHTTPSrc") == 0) {
         //souphttpsrc timeout unit = second
         g_object_set(G_OBJECT(source), "timeout", guint(timeout), NULL);
@@ -1875,7 +1918,7 @@ void QGstreamerPlayerSession::endOfMediaReset()
         m_renderer->stopRenderer();
 
     flushVideoProbes();
-    gst_element_set_state(m_pipeline, GST_STATE_NULL);
+    gst_element_set_state(m_pipeline, GST_STATE_PAUSED);
 
     QMediaPlayer::State oldState = m_state;
     m_pendingState = m_state = QMediaPlayer::StoppedState;

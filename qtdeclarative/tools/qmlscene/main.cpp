@@ -42,6 +42,7 @@
 #include <QtQml/qqmlengine.h>
 #include <QtQml/qqmlcomponent.h>
 #include <QtQml/qqmlcontext.h>
+#include <QtQml/qqmlfileselector.h>
 
 #include <QtQuick/qquickitem.h>
 #include <QtQuick/qquickview.h>
@@ -361,6 +362,7 @@ static void usage()
 #endif
     puts("  --textrendertype [qt|native].......Select the default render type for text-like elements.");
     puts("  -I <path> ........................ Add <path> to the list of import paths");
+    puts("  -S <selector> .....................Add <selector> to the list of QQmlFileSelector selectors");
     puts("  -P <path> ........................ Add <path> to the list of plugin paths");
     puts("  -translation <translationfile> ... Set the language to run in");
 
@@ -457,6 +459,7 @@ int main(int argc, char ** argv)
     Options options;
 
     QStringList imports;
+    QStringList customSelectors;
     QStringList pluginPaths;
 
     // Parse arguments for application attributes to be applied before Q[Gui]Application creation.
@@ -474,6 +477,12 @@ int main(int argc, char ** argv)
             options.applicationAttributes.append(Qt::AA_EnableHighDpiScaling);
         } else if (!qstrcmp(arg, "--no-scaling")) {
             options.applicationAttributes.append(Qt::AA_DisableHighDpiScaling);
+        } else if (!qstrcmp(arg, "--transparent")) {
+            options.transparent = true;
+        } else if (!qstrcmp(arg, "--multisample")) {
+            options.multisample = true;
+        } else if (!qstrcmp(arg, "--core-profile")) {
+            options.coreProfile = true;
         } else if (!qstrcmp(arg, "--apptype")) {
             if (++i >= argc)
                 usage();
@@ -481,6 +490,23 @@ int main(int argc, char ** argv)
                 options.applicationType = Options::QmlApplicationTypeGui;
         }
     }
+
+    if (qEnvironmentVariableIsSet("QMLSCENE_CORE_PROFILE"))
+        options.coreProfile = true;
+
+    // Set default surface format before creating the window
+    QSurfaceFormat surfaceFormat;
+    surfaceFormat.setStencilBufferSize(8);
+    surfaceFormat.setDepthBufferSize(24);
+    if (options.multisample)
+        surfaceFormat.setSamples(16);
+    if (options.transparent)
+        surfaceFormat.setAlphaBufferSize(8);
+    if (options.coreProfile) {
+        surfaceFormat.setVersion(4, 1);
+        surfaceFormat.setProfile(QSurfaceFormat::CoreProfile);
+    }
+    QSurfaceFormat::setDefaultFormat(surfaceFormat);
 
     for (Qt::ApplicationAttribute a : qAsConst(options.applicationAttributes))
         QCoreApplication::setAttribute(a);
@@ -506,8 +532,6 @@ int main(int argc, char ** argv)
                 options.maximized = true;
             else if (lowerArgument == QLatin1String("--fullscreen"))
                 options.fullscreen = true;
-            else if (lowerArgument == QLatin1String("--transparent"))
-                options.transparent = true;
             else if (lowerArgument == QLatin1String("--clip"))
                 options.clip = true;
             else if (lowerArgument == QLatin1String("--no-version-detection"))
@@ -520,14 +544,12 @@ int main(int argc, char ** argv)
                 options.translationFile = QLatin1String(argv[++i]);
             else if (lowerArgument == QLatin1String("--resize-to-root"))
                 options.resizeViewToRootItem = true;
-            else if (lowerArgument == QLatin1String("--multisample"))
-                options.multisample = true;
-            else if (lowerArgument == QLatin1String("--core-profile"))
-                options.coreProfile = true;
             else if (lowerArgument == QLatin1String("--verbose"))
                 options.verbose = true;
             else if (lowerArgument == QLatin1String("-i") && i + 1 < size)
                 imports.append(arguments.at(++i));
+            else if (lowerArgument == QLatin1String("-s") && i + 1 < size)
+                customSelectors.append(arguments.at(++i));
             else if (lowerArgument == QLatin1String("-p") && i + 1 < size)
                 pluginPaths.append(arguments.at(++i));
             else if (lowerArgument == QLatin1String("--apptype"))
@@ -583,6 +605,8 @@ int main(int argc, char ** argv)
             // TODO: as soon as the engine construction completes, the debug service is
             // listening for connections.  But actually we aren't ready to debug anything.
             QQmlEngine engine;
+            QQmlFileSelector* selector = new QQmlFileSelector(&engine, &engine);
+            selector->setExtraSelectors(customSelectors);
             QPointer<QQmlComponent> component = new QQmlComponent(&engine);
             for (int i = 0; i < imports.size(); ++i)
                 engine.addImportPath(imports.at(i));
@@ -612,6 +636,7 @@ int main(int argc, char ** argv)
                 fprintf(stderr, "%s\n", qPrintable(component->errorString()));
                 return -1;
             }
+
             QScopedPointer<QQuickWindow> window(qobject_cast<QQuickWindow *>(topLevel));
             if (window) {
                 engine.setIncubationController(window->incubationController());
@@ -635,18 +660,10 @@ int main(int argc, char ** argv)
                 if (options.verbose)
                     new DiagnosticGlContextCreationListener(window.data());
 #endif
-                QSurfaceFormat surfaceFormat = window->requestedFormat();
-                if (options.multisample)
-                    surfaceFormat.setSamples(16);
                 if (options.transparent) {
-                    surfaceFormat.setAlphaBufferSize(8);
                     window->setClearBeforeRendering(true);
                     window->setColor(QColor(Qt::transparent));
                     window->setFlags(Qt::FramelessWindowHint);
-                }
-                if (options.coreProfile) {
-                    surfaceFormat.setVersion(4, 1);
-                    surfaceFormat.setProfile(QSurfaceFormat::CoreProfile);
                 }
                 window->setFormat(surfaceFormat);
 

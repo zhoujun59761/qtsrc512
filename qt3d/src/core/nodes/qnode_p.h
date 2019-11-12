@@ -60,6 +60,7 @@
 #include <Qt3DCore/private/qobservableinterface_p.h>
 #include <Qt3DCore/private/qt3dcore_global_p.h>
 #include <QtCore/private/qobject_p.h>
+#include <QQueue>
 
 QT_BEGIN_NAMESPACE
 
@@ -144,6 +145,14 @@ public:
         m_destructionConnections.insert(node, QObject::connect(node, &QNode::nodeDestroyed, f));
     }
 
+    template<typename Caller, typename NodeType>
+    void registerPrivateDestructionHelper(NodeType *node, DestructionFunctionPointer<Caller, NodeType> func)
+    {
+        // If the node is destoyed, we make sure not to keep a dangling pointer to it
+        auto f = [this, func, node]() { (static_cast<Caller *>(this)->*func)(node); };
+        m_destructionConnections.insert(node, QObject::connect(node, &QNode::nodeDestroyed, f));
+    }
+
     void unregisterDestructionHelper(QNode *node)
     {
         QObject::disconnect(m_destructionConnections.take(node));
@@ -172,6 +181,23 @@ private:
     bool m_propertyChangesSetup;
     PropertyChangeHandler<QNodePrivate> m_signals;
     QHash<QNode *, QMetaObject::Connection> m_destructionConnections;
+};
+
+class NodePostConstructorInit : public QObject
+{
+    Q_OBJECT
+public:
+    NodePostConstructorInit(QObject *parent = nullptr);
+    virtual ~NodePostConstructorInit();
+    void removeNode(QNode *node);
+    void addNode(QNode *node);
+
+private Q_SLOTS:
+    void processNodes();
+
+private:
+    QQueue<QNodePrivate *> m_nodesToConstruct;
+    bool m_requestedProcessing;
 };
 
 } // namespace Qt3DCore

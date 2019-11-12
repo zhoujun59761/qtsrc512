@@ -1146,6 +1146,14 @@ bool VCCLCompilerTool::parseOption(const char* option)
             ShowIncludes = _True;
             break;
         }
+        if (strlen(option) > 8 && second == 't' && third == 'd') {
+            const QString version = option + 8;
+            static const QStringList knownVersions = { "14", "17", "latest" };
+            if (knownVersions.contains(version)) {
+                LanguageStandard = "stdcpp" + version;
+                break;
+            }
+        }
         found = false; break;
     case 'u':
         if (!second)
@@ -1982,6 +1990,7 @@ bool VCMIDLTool::parseOption(const char* option)
         break;
     case 0x5eb7af2: // /header filename
         offset = 5;
+        Q_FALLTHROUGH();
     case 0x0000358: // /h filename
         HeaderFileName = option + offset + 3;
         break;

@@ -68,6 +68,8 @@
 
 #include <QtWaylandClient/private/qwayland-text-input-unstable-v2.h>
 
+#include <QtCore/private/qcore_unix_p.h>
+
 #include <QtCore/QAbstractEventDispatcher>
 #include <QtGui/private/qguiapplication_p.h>
 
@@ -88,13 +90,6 @@ struct wl_surface *QWaylandDisplay::createSurface(void *handle)
     return surface;
 }
 
-QWaylandShellSurface *QWaylandDisplay::createShellSurface(QWaylandWindow *window)
-{
-    if (!mWaylandIntegration->shellIntegration())
-        return nullptr;
-    return mWaylandIntegration->shellIntegration()->createShellSurface(window);
-}
-
 struct ::wl_region *QWaylandDisplay::createRegion(const QRegion &qregion)
 {
     struct ::wl_region *region = mCompositor.create_region();
@@ -108,10 +103,16 @@ struct ::wl_region *QWaylandDisplay::createRegion(const QRegion &qregion)
 ::wl_subsurface *QWaylandDisplay::createSubSurface(QWaylandWindow *window, QWaylandWindow *parent)
 {
     if (!mSubCompositor) {
+        qCWarning(lcQpaWayland) << "Can't create subsurface, not supported by the compositor.";
         return nullptr;
     }
 
     return mSubCompositor->get_subsurface(window->object(), parent->object());
+}
+
+QWaylandShellIntegration *QWaylandDisplay::shellIntegration() const
+{
+    return mWaylandIntegration->shellIntegration();
 }
 
 QWaylandClientBufferIntegration * QWaylandDisplay::clientBufferIntegration() const
@@ -171,9 +172,9 @@ void QWaylandDisplay::checkError() const
     int ecode = wl_display_get_error(mDisplay);
     if ((ecode == EPIPE || ecode == ECONNRESET)) {
         // special case this to provide a nicer error
-        qWarning("The Wayland connection broke. Did the Wayland compositor die?");
+        qFatal("The Wayland connection broke. Did the Wayland compositor die?");
     } else {
-        qErrnoWarning(ecode, "The Wayland connection experienced a fatal error");
+        qFatal("The Wayland connection experienced a fatal error: %s", strerror(ecode));
     }
 }
 
@@ -183,26 +184,50 @@ void QWaylandDisplay::flushRequests()
         wl_display_read_events(mDisplay);
     }
 
-    if (wl_display_dispatch_pending(mDisplay) < 0) {
+    if (wl_display_dispatch_pending(mDisplay) < 0)
         checkError();
-        exitWithError();
-    }
 
     wl_display_flush(mDisplay);
 }
 
-
 void QWaylandDisplay::blockingReadEvents()
 {
-    if (wl_display_dispatch(mDisplay) < 0) {
+    if (wl_display_dispatch(mDisplay) < 0)
         checkError();
-        exitWithError();
-    }
 }
 
-void QWaylandDisplay::exitWithError()
+wl_event_queue *QWaylandDisplay::createEventQueue()
 {
-    ::exit(1);
+    return wl_display_create_queue(mDisplay);
+}
+
+void QWaylandDisplay::dispatchQueueWhile(wl_event_queue *queue, std::function<bool ()> condition, int timeout)
+{
+    if (!condition())
+        return;
+
+    QElapsedTimer timer;
+    timer.start();
+    struct pollfd pFd = qt_make_pollfd(wl_display_get_fd(mDisplay), POLLIN);
+    while (timeout == -1 || timer.elapsed() < timeout) {
+        while (wl_display_prepare_read_queue(mDisplay, queue) != 0)
+            wl_display_dispatch_queue_pending(mDisplay, queue);
+
+        wl_display_flush(mDisplay);
+
+        const int remaining = qMax(timeout - timer.elapsed(), 0ll);
+        const int pollTimeout = timeout == -1 ? -1 : remaining;
+        if (qt_poll_msecs(&pFd, 1, pollTimeout) > 0)
+            wl_display_read_events(mDisplay);
+        else
+            wl_display_cancel_read(mDisplay);
+
+        if (wl_display_dispatch_queue_pending(mDisplay, queue) < 0)
+            checkError();
+
+        if (!condition())
+            break;
+    }
 }
 
 QWaylandScreen *QWaylandDisplay::screenForOutput(struct wl_output *output) const

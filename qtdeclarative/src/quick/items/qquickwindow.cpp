@@ -64,6 +64,7 @@
 #include <QtGui/qpainter.h>
 #include <QtGui/qevent.h>
 #include <QtGui/qmatrix4x4.h>
+#include <QtGui/qpa/qplatformtheme.h>
 #include <QtCore/qvarlengtharray.h>
 #include <QtCore/qabstractanimation.h>
 #include <QtCore/QLibraryInfo>
@@ -632,24 +633,27 @@ static QMouseEvent *touchToMouseEvent(QEvent::Type type, const QTouchEvent::Touc
     return me;
 }
 
-bool QQuickWindowPrivate::checkIfDoubleClicked(ulong newPressEventTimestamp)
+bool QQuickWindowPrivate::checkIfDoubleTapped(ulong newPressEventTimestamp, QPoint newPressPos)
 {
-    bool doubleClicked;
+    bool doubleClicked = false;
 
-    if (touchMousePressTimestamp == 0) {
-        // just initialize the variable
-        touchMousePressTimestamp = newPressEventTimestamp;
-        doubleClicked = false;
-    } else {
-        ulong timeBetweenPresses = newPressEventTimestamp - touchMousePressTimestamp;
-        ulong doubleClickInterval = static_cast<ulong>(QGuiApplication::styleHints()->
-                mouseDoubleClickInterval());
-        doubleClicked = timeBetweenPresses < doubleClickInterval;
+    if (touchMousePressTimestamp > 0) {
+        QPoint distanceBetweenPresses = newPressPos - touchMousePressPos;
+        const int doubleTapDistance = QGuiApplicationPrivate::platformTheme()->themeHint(QPlatformTheme::TouchDoubleTapDistance).toInt();
+        doubleClicked = (qAbs(distanceBetweenPresses.x()) <= doubleTapDistance) && (qAbs(distanceBetweenPresses.y()) <= doubleTapDistance);
+
         if (doubleClicked) {
-            touchMousePressTimestamp = 0;
-        } else {
-            touchMousePressTimestamp = newPressEventTimestamp;
+            ulong timeBetweenPresses = newPressEventTimestamp - touchMousePressTimestamp;
+            ulong doubleClickInterval = static_cast<ulong>(QGuiApplication::styleHints()->
+                    mouseDoubleClickInterval());
+            doubleClicked = timeBetweenPresses < doubleClickInterval;
         }
+    }
+    if (doubleClicked) {
+        touchMousePressTimestamp = 0;
+    } else {
+        touchMousePressTimestamp = newPressEventTimestamp;
+        touchMousePressPos = newPressPos;
     }
 
     return doubleClicked;
@@ -707,7 +711,9 @@ bool QQuickWindowPrivate::deliverTouchAsMouse(QQuickItem *item, QQuickPointerEve
                 if (auto pointerEventPoint = pointerEvent->pointById(p.id()))
                     pointerEventPoint->setGrabberItem(item);
 
-                if (checkIfDoubleClicked(event->timestamp())) {
+                if (checkIfDoubleTapped(event->timestamp(), p.screenPos().toPoint())) {
+                    // since we synth the mouse event from from touch, we respect the
+                    // QPlatformTheme::TouchDoubleTapDistance instead of QPlatformTheme::MouseDoubleClickDistance
                     QScopedPointer<QMouseEvent> mouseDoubleClick(touchToMouseEvent(QEvent::MouseButtonDblClick, p, event.data(), item, false));
                     QCoreApplication::sendEvent(item, mouseDoubleClick.data());
                     event->setAccepted(mouseDoubleClick->isAccepted());
@@ -722,6 +728,12 @@ bool QQuickWindowPrivate::deliverTouchAsMouse(QQuickItem *item, QQuickPointerEve
         // Touch point was there before and moved
         } else if (touchMouseDevice == device && p.id() == touchMouseId) {
             if (p.state() & Qt::TouchPointMoved) {
+                if (touchMousePressTimestamp != 0) {
+                    const int doubleTapDistance = QGuiApplicationPrivate::platformTheme()->themeHint(QPlatformTheme::TouchDoubleTapDistance).toInt();
+                    const QPoint moveDelta = p.screenPos().toPoint() - touchMousePressPos;
+                    if (moveDelta.x() >= doubleTapDistance || moveDelta.y() >= doubleTapDistance)
+                        touchMousePressTimestamp = 0;   // Got dragged too far, dismiss the double tap
+                }
                 if (QQuickItem *mouseGrabberItem = q->mouseGrabberItem()) {
                     QScopedPointer<QMouseEvent> me(touchToMouseEvent(QEvent::MouseMove, p, event.data(), mouseGrabberItem, false));
                     QCoreApplication::sendEvent(item, me.data());
@@ -1613,7 +1625,9 @@ bool QQuickWindow::event(QEvent *e)
         bool accepted = enter->isAccepted();
         bool delivered = d->deliverHoverEvent(d->contentItem, enter->windowPos(), d->lastMousePosition,
             QGuiApplication::keyboardModifiers(), 0L, accepted);
+        d->lastMousePosition = enter->windowPos();
         enter->setAccepted(accepted);
+        d->updateCursor(mapFromGlobal(QCursor::pos()));
         return delivered;
     }
         break;
@@ -2015,8 +2029,8 @@ bool QQuickWindowPrivate::deliverTouchCancelEvent(QTouchEvent *event)
     qCDebug(DBG_TOUCH) << event;
     Q_Q(QQuickWindow);
 
-    if (q->mouseGrabberItem())
-        q->mouseGrabberItem()->ungrabMouse();
+    if (QQuickItem *grabber = q->mouseGrabberItem())
+        sendUngrabEvent(grabber, true);
     cancelTouchMouseSynthesis();
 
     // A TouchCancel event will typically not contain any points.
@@ -2527,18 +2541,22 @@ bool QQuickWindowPrivate::deliverPressOrReleaseEvent(QQuickPointerEvent *event, 
     int pointCount = event->pointCount();
     QVector<QQuickItem *> targetItems;
     bool isTouchEvent = (event->asPointerTouchEvent() != nullptr);
-    if (isTouchEvent && event->isPressEvent() && isDeliveringTouchAsMouse() &&
-            pointerEventInstance(touchMouseDevice)->pointById(touchMouseId)->grabberPointerHandler()) {
-        // When a second point is pressed, if the first point's existing
-        // grabber was a pointer handler while a filtering parent is filtering
-        // the same first point _as mouse_: we're starting over with delivery,
-        // so we need to allow the second point to now be sent as a synth-mouse
-        // instead of the first one, so that filtering parents (maybe even the
-        // same one) can get a chance to see the second touchpoint as a
-        // synth-mouse and perhaps grab it.  Ideally we would always do this
-        // when a new touchpoint is pressed, but this compromise fixes
-        // QTBUG-70998 and avoids breaking tst_FlickableInterop::touchDragSliderAndFlickable
-        cancelTouchMouseSynthesis();
+    if (isTouchEvent && event->isPressEvent() && isDeliveringTouchAsMouse()) {
+        if (const QQuickEventPoint *point = pointerEventInstance(touchMouseDevice)->pointById(touchMouseId)) {
+            // When a second point is pressed, if the first point's existing
+            // grabber was a pointer handler while a filtering parent is filtering
+            // the same first point _as mouse_: we're starting over with delivery,
+            // so we need to allow the second point to now be sent as a synth-mouse
+            // instead of the first one, so that filtering parents (maybe even the
+            // same one) can get a chance to see the second touchpoint as a
+            // synth-mouse and perhaps grab it.  Ideally we would always do this
+            // when a new touchpoint is pressed, but this compromise fixes
+            // QTBUG-70998 and avoids breaking tst_FlickableInterop::touchDragSliderAndFlickable
+            if (point->grabberPointerHandler())
+                cancelTouchMouseSynthesis();
+        } else {
+            qCWarning(DBG_TOUCH_TARGET) << "during delivery of touch press, synth-mouse ID" << hex << touchMouseId << "is missing from" << event;
+        }
     }
     for (int i = 0; i < pointCount; ++i) {
         auto point = event->point(i);
@@ -4822,10 +4840,18 @@ void QQuickWindow::scheduleRenderJob(QRunnable *job, RenderStage stage)
     } else if (stage == AfterSwapStage) {
         d->afterSwapJobs << job;
     } else if (stage == NoStage) {
-        if (isExposed())
-            d->windowManager->postJob(this, job);
-        else
+        if (d->renderControl && openglContext()
+#if QT_CONFIG(opengl)
+            && openglContext()->thread() == QThread::currentThread()
+#endif
+            ) {
+            job->run();
             delete job;
+        } else if (isExposed()) {
+            d->windowManager->postJob(this, job);
+        } else {
+            delete job;
+        }
     }
     d->renderJobMutex.unlock();
 }

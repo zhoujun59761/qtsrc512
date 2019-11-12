@@ -67,6 +67,8 @@ private slots:
     void boundsOnElement() const;
     void gradientStops() const;
     void gradientRefs();
+    void recursiveRefs_data();
+    void recursiveRefs();
     void fillRule();
     void opacity();
     void paths();
@@ -77,6 +79,7 @@ private slots:
     void testUseElement();
     void smallFont();
     void styleSheet();
+    void duplicateStyleId();
 
 #ifndef QT_NO_COMPRESS
     void testGzLoading();
@@ -139,22 +142,28 @@ void tst_QSvgRenderer::invalidUrl_data()
 {
     QTest::addColumn<QByteArray>("svg");
 
-    QTest::newRow("00") << QByteArray("<svg><circle fill=\"url\" /></svg>");
-    QTest::newRow("01") << QByteArray("<svg><circle fill=\"url0\" /></svg>");
-    QTest::newRow("02") << QByteArray("<svg><circle fill=\"url(0\" /></svg>");
-    QTest::newRow("03") << QByteArray("<svg><circle fill=\"url (0\" /></svg>");
-    QTest::newRow("04") << QByteArray("<svg><circle fill=\"url ( 0\" /></svg>");
-    QTest::newRow("05") << QByteArray("<svg><circle fill=\"url#\" /></svg>");
-    QTest::newRow("06") << QByteArray("<svg><circle fill=\"url#(\" /></svg>");
-    QTest::newRow("07") << QByteArray("<svg><circle fill=\"url(#\" /></svg>");
-    QTest::newRow("08") << QByteArray("<svg><circle fill=\"url(# \" /></svg>");
-    QTest::newRow("09") << QByteArray("<svg><circle fill=\"url(# 0\" /></svg>");
+    QTest::newRow("01") << QByteArray("<svg><linearGradient id=\"0\"/><circle fill=\"url0\" /></svg>");
+    QTest::newRow("02") << QByteArray("<svg><linearGradient id=\"0\"/><circle fill=\"url(0\" /></svg>");
+    QTest::newRow("03") << QByteArray("<svg><linearGradient id=\"0\"/><circle fill=\"url (0\" /></svg>");
+    QTest::newRow("04") << QByteArray("<svg><linearGradient id=\"0\"/><circle fill=\"url ( 0\" /></svg>");
+    QTest::newRow("05") << QByteArray("<svg><linearGradient id=\"0\"/><circle fill=\"url#\" /></svg>");
+    QTest::newRow("06") << QByteArray("<svg><linearGradient id=\"0\"/><circle fill=\"url#(\" /></svg>");
+    QTest::newRow("07") << QByteArray("<svg><linearGradient id=\"0\"/><circle fill=\"url(#\" /></svg>");
+    QTest::newRow("08") << QByteArray("<svg><linearGradient id=\"0\"/><circle fill=\"url(# \" /></svg>");
+    QTest::newRow("09") << QByteArray("<svg><linearGradient id=\"0\"/><circle fill=\"url(# 0\" /></svg>");
+    QTest::newRow("10") << QByteArray("<svg><linearGradient id=\"blabla\"/><circle fill=\"urlblabla\" /></svg>");
+    QTest::newRow("11") << QByteArray("<svg><linearGradient id=\"blabla\"/><circle fill=\"url(blabla\" /></svg>");
+    QTest::newRow("12") << QByteArray("<svg><linearGradient id=\"blabla\"/><circle fill=\"url(blabla)\" /></svg>");
+    QTest::newRow("13") << QByteArray("<svg><linearGradient id=\"blabla\"/><circle fill=\"url(#blabla\" /></svg>");
 }
 
 void tst_QSvgRenderer::invalidUrl()
 {
     QFETCH(QByteArray, svg);
 
+#if QT_CONFIG(regularexpression)
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression("Could not resolve property"));
+#endif
     QSvgRenderer renderer(svg);
     QVERIFY(renderer.isValid());
 }
@@ -665,6 +674,43 @@ void tst_QSvgRenderer::gradientRefs()
         QVERIFY((qAbs(qAlpha(mid) - 127) < 3) && (qAbs(qRed(mid) - 63) < 4) && (qGreen(mid) == 0) && (qAbs(qBlue(mid) - 63) < 4));
         QVERIFY((qAlpha(right) > 253) && (qRed(right) < 3) && (qGreen(right) == 0) && (qBlue(right) > 251));
     }
+}
+
+void tst_QSvgRenderer::recursiveRefs_data()
+{
+    QTest::addColumn<QByteArray>("svg");
+
+    QTest::newRow("single") << QByteArray("<svg>"
+                                          "<linearGradient id='0' xlink:href='#0'/>"
+                                          "<rect x='0' y='0' width='20' height='20' fill='url(#0)'/>"
+                                          "</svg>");
+
+    QTest::newRow("double") << QByteArray("<svg>"
+                                          "<linearGradient id='0' xlink:href='#1'/>"
+                                          "<linearGradient id='1' xlink:href='#0'/>"
+                                          "<rect x='0' y='0' width='20' height='20' fill='url(#0)'/>"
+                                          "</svg>");
+
+    QTest::newRow("triple") << QByteArray("<svg>"
+                                          "<linearGradient id='0' xlink:href='#1'/>"
+                                          "<linearGradient id='1' xlink:href='#2'/>"
+                                          "<linearGradient id='2' xlink:href='#0'/>"
+                                          "<rect x='0' y='0' width='20' height='20' fill='url(#0)'/>"
+                                          "</svg>");
+}
+
+void tst_QSvgRenderer::recursiveRefs()
+{
+    QFETCH(QByteArray, svg);
+
+    QImage image(20, 20, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::green);
+    QImage refImage = image.copy();
+
+    QSvgRenderer renderer(svg);
+    QPainter painter(&image);
+    renderer.render(&painter);
+    QCOMPARE(image, refImage);
 }
 
 
@@ -1377,6 +1423,16 @@ void tst_QSvgRenderer::testUseElement()
         "   <circle fill=\"#a6ce39\" cx=\"0\" cy=\"0\" r=\"33\" />"
         "  </g>"
         " </defs>"
+        "</svg>",
+        // 17 - Indirect self referral
+        "<svg>"
+        " <defs>"
+        "   <g id=\"g0\">"
+        "     <g id=\"g1\"><use href=\"#g2\"/></g>"
+        "     <g id=\"g2\"><use href=\"#g1\"/></g>"
+        "   </g>"
+        " </defs>"
+        " <use xlink:href=\"#g0\" fill=\"black\"/>"
         "</svg>"
     };
 
@@ -1457,6 +1513,18 @@ void tst_QSvgRenderer::styleSheet()
         p.end();
     }
     QCOMPARE(images[0], images[1]);
+}
+
+void tst_QSvgRenderer::duplicateStyleId()
+{
+    QByteArray svg = QByteArrayLiteral("<svg><linearGradient id=\"a\"/>"
+                                       "<rect style=\"fill:url(#a)\"/>"
+                                       "<linearGradient id=\"a\"/></svg>");
+    QTest::ignoreMessage(QtWarningMsg, "Duplicate unique style id: \"a\"");
+    QImage image(200, 200, QImage::Format_RGB32);
+    QPainter painter(&image);
+    QSvgRenderer renderer(svg);
+    renderer.render(&painter);
 }
 
 QTEST_MAIN(tst_QSvgRenderer)
