@@ -13,6 +13,7 @@ SUBDIRS += \
     custom-mesh-update-data-cpp \
     custom-mesh-update-data-qml \
     cylinder-cpp \
+    cylinder-parent-test \
     cylinder-qml \
     deferred-renderer-cpp \
     deferred-renderer-qml \
@@ -60,7 +61,8 @@ SUBDIRS += \
     raycasting-qml \
     shared_texture_image \
     texture_property_updates \
-    qtbug-72236
+    qtbug-72236 \
+    qtbug-76766
 
 qtHaveModule(widgets): {
     SUBDIRS += \

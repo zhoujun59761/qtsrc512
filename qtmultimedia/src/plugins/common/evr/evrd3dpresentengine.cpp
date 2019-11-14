@@ -594,8 +594,9 @@ QVideoFrame D3DPresentEngine::makeVideoFrame(IMFSample *sample)
                       m_surfaceFormat.pixelFormat());
 
     // WMF uses 100-nanosecond units, Qt uses microseconds
-    LONGLONG startTime = -1;
-    if (SUCCEEDED(sample->GetSampleTime(&startTime))) {
+    LONGLONG startTime = 0;
+    auto hr = sample->GetSampleTime(&startTime);
+     if (SUCCEEDED(hr)) {
         frame.setStartTime(startTime * 0.1);
 
         LONGLONG duration = -1;

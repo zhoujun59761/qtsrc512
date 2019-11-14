@@ -56,9 +56,12 @@ Window {
     WebEngineView {
         id: view
         anchors.fill: parent
-        onLoadingChanged: function(reqeust) {
-            if (reqeust.status === WebEngineView.LoadSucceededStatus) {
+        onLoadingChanged: function(request) {
+            if (request.status === WebEngineView.LoadSucceededStatus) {
                 handler.ready = true
+            } else if (request.status === WebEngineView.LoadFailedStatus) {
+                console.log("Page was not successfully loaded from qrc! Status: " + request.status
+                    + ", error [code: " + request.errorCode + "]: '" + request.errorString + "'")
             }
         }
 

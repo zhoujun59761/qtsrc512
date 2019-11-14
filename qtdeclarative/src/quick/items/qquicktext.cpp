@@ -442,7 +442,7 @@ void QQuickTextPrivate::updateSize()
         if (internalWidthUpdate)
             return;
 
-        extra->doc->setPageSize(QSizeF());
+        extra->doc->setPageSize(QSizeF(q->width(), -1));
         if (q->widthValid() && (wrapMode != QQuickText::NoWrap || extra->doc->idealWidth() < availableWidth()))
             extra->doc->setTextWidth(availableWidth());
         else

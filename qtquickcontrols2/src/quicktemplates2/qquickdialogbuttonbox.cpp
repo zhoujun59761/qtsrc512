@@ -241,11 +241,8 @@ void QQuickDialogButtonBoxPrivate::resizeContent()
         return;
 
     QRectF geometry = q->boundingRect().adjusted(q->leftPadding(), q->topPadding(), -q->rightPadding(), -q->bottomPadding());
-    if (alignment != 0) {
-        qreal cw = (alignment & Qt::AlignHorizontal_Mask) == 0 ? q->availableWidth() : contentItem->property("contentWidth").toReal();
-        qreal ch = (alignment & Qt::AlignVertical_Mask) == 0 ? q->availableHeight() : contentItem->property("contentHeight").toReal();
-        geometry = alignedRect(q->isMirrored() ? Qt::RightToLeft : Qt::LeftToRight, alignment, QSizeF(cw, ch), geometry);
-    }
+    if (alignment != 0)
+        geometry = alignedRect(q->isMirrored() ? Qt::RightToLeft : Qt::LeftToRight, alignment, QSizeF(contentWidth, contentHeight), geometry);
 
     contentItem->setPosition(geometry.topLeft());
     contentItem->setSize(geometry.size());
@@ -298,6 +295,7 @@ void QQuickDialogButtonBoxPrivate::updateLayout()
             if (firstRole != secondRole && firstRole != QPlatformDialogHelper::InvalidRole && secondRole != QPlatformDialogHelper::InvalidRole) {
                 const int *l = m_layout;
                 while (*l != QPlatformDialogHelper::EOL) {
+                    // Unset the Reverse flag.
                     const int role = (*l & ~QPlatformDialogHelper::Reverse);
                     if (role == firstRole)
                         return true;
@@ -308,14 +306,14 @@ void QQuickDialogButtonBoxPrivate::updateLayout()
             }
 
             if (firstRole == secondRole)
-                return first < second;
+                return false;
 
             return firstRole != QPlatformDialogHelper::InvalidRole;
         }
         const int *m_layout;
     };
 
-    std::sort(buttons.begin(), buttons.end(), ButtonLayout(static_cast<QPlatformDialogHelper::ButtonLayout>(buttonLayout)));
+    std::stable_sort(buttons.begin(), buttons.end(), ButtonLayout(static_cast<QPlatformDialogHelper::ButtonLayout>(buttonLayout)));
 
     for (int i = 0; i < buttons.count() - 1; ++i)
         q->insertItem(i, buttons.at(i));

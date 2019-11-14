@@ -51,6 +51,8 @@
 #include <private/qqmlengine_p.h>
 #include <private/qv4vme_moth_p.h>
 #include <private/qv4module_p.h>
+#include <private/qv4qobjectwrapper_p.h>
+#include <private/qqmlvaluetypewrapper_p.h>
 #include "qv4compilationunitmapper_p.h"
 #include <QQmlPropertyMap>
 #include <QDateTime>
@@ -96,18 +98,25 @@ CompilationUnit::CompilationUnit(const Unit *unitData, const QString &fileName, 
     setUnitData(unitData, nullptr, fileName, finalUrlString);
 }
 
-#ifndef V4_BOOTSTRAP
 CompilationUnit::~CompilationUnit()
 {
+#ifndef V4_BOOTSTRAP
     unlink();
+#endif
 
     if (data) {
         if (data->qmlUnit() != qmlData)
             free(const_cast<QmlUnit *>(qmlData));
         qmlData = nullptr;
 
+#ifndef V4_BOOTSTRAP
         if (!(data->flags & QV4::CompiledData::Unit::StaticData))
             free(const_cast<Unit *>(data));
+#else
+        // Unconditionally free the memory. In the dev tools we create units that have
+        // the flag set and will be saved to disk, so intended to persist later.
+        free(const_cast<Unit *>(data));
+#endif
     }
     data = nullptr;
 #if Q_BYTE_ORDER == Q_BIG_ENDIAN
@@ -118,6 +127,7 @@ CompilationUnit::~CompilationUnit()
     delete [] imports;
     imports = nullptr;
 }
+#ifndef V4_BOOTSTRAP
 
 QString CompilationUnit::localCacheFilePath(const QUrl &url)
 {
@@ -168,6 +178,8 @@ QV4::Function *CompilationUnit::linkToEngine(ExecutionEngine *engine)
                 l->setter = QV4::Lookup::setterGeneric;
             else if (type == CompiledData::Lookup::Type_GlobalGetter)
                 l->globalGetter = QV4::Lookup::globalGetterGeneric;
+            else if (type == CompiledData::Lookup::Type_QmlContextPropertyGetter)
+                l->qmlContextPropertyGetter = QQmlContextWrapper::resolveQmlContextPropertyLookupGetter;
             l->nameIndex = compiledLookups[i].nameIndex;
         }
     }
@@ -269,6 +281,24 @@ void CompilationUnit::unlink()
     }
 
     propertyCaches.clear();
+
+    if (runtimeLookups) {
+        for (uint i = 0; i < data->lookupTableSize; ++i) {
+            QV4::Lookup &l = runtimeLookups[i];
+            if (l.getter == QV4::QObjectWrapper::lookupGetter) {
+                if (QQmlPropertyCache *pc = l.qobjectLookup.propertyCache)
+                    pc->release();
+            } else if (l.getter == QQmlValueTypeWrapper::lookupGetter) {
+                if (QQmlPropertyCache *pc = l.qgadgetLookup.propertyCache)
+                    pc->release();
+            }
+
+            if (l.qmlContextPropertyGetter == QQmlContextWrapper::lookupScopeObjectProperty) {
+                if (QQmlPropertyCache *pc = l.qobjectLookup.propertyCache)
+                    pc->release();
+            }
+        }
+    }
 
     dependentScripts.clear();
 
@@ -440,8 +470,10 @@ Heap::Module *CompilationUnit::instantiate(ExecutionEngine *engine)
     ScopedString importName(scope);
 
     const uint importCount = data->importEntryTableSize;
-    imports = new const Value *[importCount];
-    memset(imports, 0, importCount * sizeof(Value *));
+    if (importCount > 0) {
+        imports = new const Value *[importCount];
+        memset(imports, 0, importCount * sizeof(Value *));
+    }
     for (uint i = 0; i < importCount; ++i) {
         const CompiledData::ImportEntry &entry = data->importEntryTable()[i];
         auto dependentModuleUnit = engine->loadModule(QUrl(stringAt(entry.moduleRequest)), this);
@@ -851,7 +883,7 @@ QQmlRefPointer<QQmlPropertyCache> ResolvedTypeReference::createPropertyCache(QQm
     if (typePropertyCache) {
         return typePropertyCache;
     } else if (type.isValid()) {
-        typePropertyCache = QQmlEnginePrivate::get(engine)->cache(type.metaObject());
+        typePropertyCache = QQmlEnginePrivate::get(engine)->cache(type.metaObject(), minorVersion);
         return typePropertyCache;
     } else {
         return compilationUnit->rootPropertyCache();
@@ -865,6 +897,8 @@ bool ResolvedTypeReference::addToHash(QCryptographicHash *hash, QQmlEngine *engi
         hash->addData(createPropertyCache(engine)->checksum(&ok));
         return ok;
     }
+    if (!compilationUnit)
+        return false;
     hash->addData(compilationUnit->unitData()->md5Checksum, sizeof(compilationUnit->unitData()->md5Checksum));
     return true;
 }

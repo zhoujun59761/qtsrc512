@@ -6,7 +6,8 @@ gn_args += \
     enable_session_service=false \
     ninja_use_custom_environment_files=false \
     is_multi_dll_chrome=false \
-    win_linker_timing=true
+    win_linker_timing=true \
+    com_init_check_hook_disabled=true
 
 isDeveloperBuild() {
     gn_args += \
@@ -55,6 +56,8 @@ msvc:contains(QT_ARCH, "i386"):!usingMSVC32BitCrossCompiler() {
 msvc {
     equals(MSVC_VER, 15.0) {
         MSVS_VERSION = 2017
+    } else: equals(MSVC_VER, 16.0) {
+        MSVS_VERSION = 2019
     } else {
         error("Visual Studio compiler version \"$$MSVC_VER\" is not supported by Qt WebEngine")
     }

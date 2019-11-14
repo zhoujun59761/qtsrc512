@@ -446,7 +446,7 @@ public:
     virtual void didFindText(quint64 requestId, int matchCount) = 0;
     virtual void didPrintPage(quint64 requestId, const QByteArray &result) = 0;
     virtual void didPrintPageToPdf(const QString &filePath, bool success) = 0;
-    virtual void passOnFocus(bool reverse) = 0;
+    virtual bool passOnFocus(bool reverse) = 0;
     // returns the last QObject (QWidget/QQuickItem) based object in the accessibility
     // hierarchy before going into the BrowserAccessibility tree
     virtual QObject *accessibilityParentObject() = 0;
@@ -466,6 +466,7 @@ public:
     virtual void updateScrollPosition(const QPointF &position) = 0;
     virtual void updateContentsSize(const QSizeF &size) = 0;
     virtual void updateNavigationActions() = 0;
+    virtual void updateEditActions() = 0;
     virtual void startDragging(const content::DropData &dropData, Qt::DropActions allowedActions,
                                const QPixmap &pixmap, const QPoint &offset) = 0;
     virtual bool supportsDragging() const = 0;
@@ -478,6 +479,7 @@ public:
 
     virtual ProfileAdapter *profileAdapter() = 0;
     virtual WebContentsAdapter* webContentsAdapter() = 0;
+    virtual void releaseProfile() = 0;
 
 };
 

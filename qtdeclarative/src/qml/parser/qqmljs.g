@@ -614,16 +614,8 @@ bool Parser::parse(int startToken)
     program = 0;
 
     do {
-        if (++tos == stack_size) {
+        if (++tos == stack_size)
             reallocateStack();
-            if (stack_size > 10000) {
-                // We're now in some serious right-recursive stuff, which will probably result in
-                // an AST that's so deep that recursively visiting it will run out of stack space.
-                const QString msg = QCoreApplication::translate("QQmlParser", "Maximum statement or expression depth exceeded");
-                diagnostic_messages.append(DiagnosticMessage(DiagnosticMessage::Error, token_buffer[0].loc, msg));
-                return false;
-            }
-        }
 
         state_stack[tos] = action;
 
@@ -1118,6 +1110,23 @@ UiObjectMember: T_PROPERTY T_IDENTIFIER T_LT UiPropertyType T_GT QmlIdentifier T
     } break;
 ./
 
+UiObjectMember: T_READONLY T_PROPERTY T_IDENTIFIER T_LT UiPropertyType T_GT QmlIdentifier T_AUTOMATIC_SEMICOLON;
+UiObjectMember: T_READONLY T_PROPERTY T_IDENTIFIER T_LT UiPropertyType T_GT QmlIdentifier T_SEMICOLON;
+/.
+    case $rule_number: {
+        AST::UiPublicMember *node = new (pool) AST::UiPublicMember(sym(5).UiQualifiedId->finish(), stringRef(7));
+        node->isReadonlyMember = true;
+        node->readonlyToken = loc(1);
+        node->typeModifier = stringRef(3);
+        node->propertyToken = loc(2);
+        node->typeModifierToken = loc(3);
+        node->typeToken = loc(5);
+        node->identifierToken = loc(7);
+        node->semicolonToken = loc(8);
+        sym(1).Node = node;
+    } break;
+./
+
 UiObjectMember: T_PROPERTY UiPropertyType QmlIdentifier T_AUTOMATIC_SEMICOLON;
 UiObjectMember: T_PROPERTY UiPropertyType QmlIdentifier T_SEMICOLON;
 /.
@@ -1162,8 +1171,14 @@ UiObjectMember: T_DEFAULT T_PROPERTY T_IDENTIFIER T_LT UiPropertyType T_GT QmlId
         sym(1).Node = node;
     } break;
 ./
+Semicolon: T_SEMICOLON | T_AUTOMATIC_SEMICOLON;
+OptionalSemicolon: | Semicolon;
+/.
+/* we need OptionalSemicolon because UiScriptStatement might already parse the last semicolon
+  and then we would miss a semicolon (see tests/auto/quick/qquickvisualdatamodel/data/objectlist.qml)*/
+ ./
 
-UiObjectMember: T_PROPERTY UiPropertyType QmlIdentifier T_COLON UiScriptStatement;
+UiObjectMember: T_PROPERTY UiPropertyType QmlIdentifier T_COLON UiScriptStatement OptionalSemicolon;
 /.
     case $rule_number: {
         AST::UiPublicMember *node = new (pool) AST::UiPublicMember(sym(2).UiQualifiedId->finish(), stringRef(3), sym(5).Statement);
@@ -1175,7 +1190,7 @@ UiObjectMember: T_PROPERTY UiPropertyType QmlIdentifier T_COLON UiScriptStatemen
     } break;
 ./
 
-UiObjectMember: T_READONLY T_PROPERTY UiPropertyType QmlIdentifier T_COLON UiScriptStatement;
+UiObjectMember: T_READONLY T_PROPERTY UiPropertyType QmlIdentifier T_COLON UiScriptStatement OptionalSemicolon;
 /.
     case $rule_number: {
         AST::UiPublicMember *node = new (pool) AST::UiPublicMember(sym(3).UiQualifiedId->finish(), stringRef(4), sym(6).Statement);
@@ -1189,7 +1204,7 @@ UiObjectMember: T_READONLY T_PROPERTY UiPropertyType QmlIdentifier T_COLON UiScr
     } break;
 ./
 
-UiObjectMember: T_DEFAULT T_PROPERTY UiPropertyType QmlIdentifier T_COLON UiScriptStatement;
+UiObjectMember: T_DEFAULT T_PROPERTY UiPropertyType QmlIdentifier T_COLON UiScriptStatement OptionalSemicolon;
 /.
     case $rule_number: {
         AST::UiPublicMember *node = new (pool) AST::UiPublicMember(sym(3).UiQualifiedId->finish(), stringRef(4), sym(6).Statement);
@@ -1203,7 +1218,7 @@ UiObjectMember: T_DEFAULT T_PROPERTY UiPropertyType QmlIdentifier T_COLON UiScri
     } break;
 ./
 
-UiObjectMember: T_PROPERTY T_IDENTIFIER T_LT UiPropertyType T_GT QmlIdentifier T_COLON T_LBRACKET UiArrayMemberList T_RBRACKET;
+UiObjectMember: T_PROPERTY T_IDENTIFIER T_LT UiPropertyType T_GT QmlIdentifier T_COLON T_LBRACKET UiArrayMemberList T_RBRACKET Semicolon;
 /.
     case $rule_number: {
         AST::UiPublicMember *node = new (pool) AST::UiPublicMember(sym(4).UiQualifiedId->finish(), stringRef(6));
@@ -1229,7 +1244,35 @@ UiObjectMember: T_PROPERTY T_IDENTIFIER T_LT UiPropertyType T_GT QmlIdentifier T
     } break;
 ./
 
-UiObjectMember: T_PROPERTY UiPropertyType QmlIdentifier T_COLON ExpressionStatementLookahead UiQualifiedId UiObjectInitializer;
+UiObjectMember: T_READONLY T_PROPERTY T_IDENTIFIER T_LT UiPropertyType T_GT QmlIdentifier T_COLON T_LBRACKET UiArrayMemberList T_RBRACKET Semicolon;
+/.
+    case $rule_number: {
+        AST::UiPublicMember *node = new (pool) AST::UiPublicMember(sym(5).UiQualifiedId->finish(), stringRef(7));
+        node->isReadonlyMember = true;
+        node->readonlyToken = loc(1);
+        node->typeModifier = stringRef(3);
+        node->propertyToken = loc(2);
+        node->typeModifierToken = loc(3);
+        node->typeToken = loc(5);
+        node->identifierToken = loc(7);
+        node->semicolonToken = loc(8); // insert a fake ';' before ':'
+
+        AST::UiQualifiedId *propertyName = new (pool) AST::UiQualifiedId(stringRef(7));
+        propertyName->identifierToken = loc(7);
+        propertyName->next = 0;
+
+        AST::UiArrayBinding *binding = new (pool) AST::UiArrayBinding(propertyName, sym(10).UiArrayMemberList->finish());
+        binding->colonToken = loc(8);
+        binding->lbracketToken = loc(9);
+        binding->rbracketToken = loc(11);
+
+        node->binding = binding;
+
+        sym(1).Node = node;
+    } break;
+./
+
+UiObjectMember: T_PROPERTY UiPropertyType QmlIdentifier T_COLON ExpressionStatementLookahead UiQualifiedId UiObjectInitializer Semicolon;
 /.
     case $rule_number: {
         AST::UiPublicMember *node = new (pool) AST::UiPublicMember(sym(2).UiQualifiedId->finish(), stringRef(3));
@@ -1252,7 +1295,7 @@ UiObjectMember: T_PROPERTY UiPropertyType QmlIdentifier T_COLON ExpressionStatem
     } break;
 ./
 
-UiObjectMember: T_READONLY T_PROPERTY UiPropertyType QmlIdentifier T_COLON ExpressionStatementLookahead UiQualifiedId UiObjectInitializer;
+UiObjectMember: T_READONLY T_PROPERTY UiPropertyType QmlIdentifier T_COLON ExpressionStatementLookahead UiQualifiedId UiObjectInitializer Semicolon;
 /.
     case $rule_number: {
         AST::UiPublicMember *node = new (pool) AST::UiPublicMember(sym(3).UiQualifiedId->finish(), stringRef(4));
@@ -1781,10 +1824,6 @@ PropertyDefinition: PropertyName T_COLON AssignmentExpression_In;
 /.
     case $rule_number: {
         AST::PatternProperty *node = new (pool) AST::PatternProperty(sym(1).PropertyName, sym(3).Expression);
-        if (auto *f = asAnonymousFunctionDefinition(sym(3).Expression)) {
-            if (!AST::cast<AST::ComputedPropertyName *>(sym(1).PropertyName))
-                f->name = driver->newStringRef(sym(1).PropertyName->asString());
-        }
         if (auto *c = asAnonymousClassDefinition(sym(3).Expression)) {
             if (!AST::cast<AST::ComputedPropertyName *>(sym(1).PropertyName))
                 c->name = driver->newStringRef(sym(1).PropertyName->asString());

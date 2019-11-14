@@ -80,6 +80,8 @@ private slots:
     void qrcUrls();
     void cppSignalAndEval();
     void singletonInstance();
+    void aggressiveGc();
+    void cachedGetterLookup_qtbug_75335();
 
 public slots:
     QObject *createAQObjectForOwnershipTest ()
@@ -1041,6 +1043,28 @@ void tst_qqmlengine::singletonInstance()
         SomeQObjectClass * instance = engine.singletonInstance<SomeQObjectClass*>(cppSingletonTypeId);
         QVERIFY(!instance);
     }
+}
+
+void tst_qqmlengine::aggressiveGc()
+{
+    const QByteArray origAggressiveGc = qgetenv("QV4_MM_AGGRESSIVE_GC");
+    qputenv("QV4_MM_AGGRESSIVE_GC", "true");
+    {
+        QQmlEngine engine; // freezing should not run into infinite recursion
+        QJSValue obj = engine.newObject();
+        QVERIFY(obj.isObject());
+    }
+    qputenv("QV4_MM_AGGRESSIVE_GC", origAggressiveGc);
+}
+
+void tst_qqmlengine::cachedGetterLookup_qtbug_75335()
+{
+    QQmlEngine engine;
+    const QUrl testUrl = testFileUrl("CachedGetterLookup.qml");
+    QQmlComponent component(&engine, testUrl);
+    QVERIFY(component.isReady());
+    QScopedPointer<QObject> object(component.create());
+    QVERIFY(object != nullptr);
 }
 
 QTEST_MAIN(tst_qqmlengine)

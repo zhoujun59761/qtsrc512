@@ -40,6 +40,7 @@
 #ifndef WEB_CONTENTS_DELEGATE_QT_H
 #define WEB_CONTENTS_DELEGATE_QT_H
 
+#include "content/browser/frame_host/frame_tree_node.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -70,6 +71,23 @@ class WebContentsAdapter;
 class WebContentsAdapterClient;
 class WebEngineSettings;
 
+class FrameFocusedObserver : public content::FrameTreeNode::Observer
+{
+public:
+    FrameFocusedObserver(WebContentsAdapterClient *adapterClient);
+    ~FrameFocusedObserver();
+    void addNode(content::FrameTreeNode *node);
+    void removeNode(content::FrameTreeNode *node);
+
+protected:
+    void OnFrameTreeNodeFocused(content::FrameTreeNode *node) override;
+    void OnFrameTreeNodeDestroyed(content::FrameTreeNode *node) override;
+
+private:
+    WebContentsAdapterClient *m_viewClient;
+    QVector<content::FrameTreeNode *> m_observedNodes;
+};
+
 class SavePageInfo
 {
 public:
@@ -96,6 +114,7 @@ public:
     QString lastSearchedString() const { return m_lastSearchedString; }
     void setLastSearchedString(const QString &s) { m_lastSearchedString = s; }
     int lastReceivedFindReply() const { return m_lastReceivedFindReply; }
+    void setLastReceivedFindReply(int id) { m_lastReceivedFindReply = id; }
 
     QUrl url() const { return m_url; }
     QString title() const { return m_title; }
@@ -127,9 +146,12 @@ public:
     bool CheckMediaAccessPermission(content::RenderFrameHost* render_frame_host, const GURL& security_origin, content::MediaStreamType type) override;
     void RegisterProtocolHandler(content::WebContents* web_contents, const std::string& protocol, const GURL& url, bool user_gesture) override;
     void UnregisterProtocolHandler(content::WebContents* web_contents, const std::string& protocol, const GURL& url, bool user_gesture) override;
+    bool TakeFocus(content::WebContents *source, bool reverse) override;
 
     // WebContentsObserver overrides
+    void RenderFrameCreated(content::RenderFrameHost *render_frame_host) override;
     void RenderFrameDeleted(content::RenderFrameHost *render_frame_host) override;
+    void RenderFrameHostChanged(content::RenderFrameHost *old_host, content::RenderFrameHost *new_host) override;
     void RenderViewHostChanged(content::RenderViewHost *old_host, content::RenderViewHost *new_host) override;
     void DidStartNavigation(content::NavigationHandle *navigation_handle) override;
     void DidFinishNavigation(content::NavigationHandle *navigation_handle) override;
@@ -171,6 +193,7 @@ private:
     QSharedPointer<FilePickerController> m_filePickerController;
     QUrl m_initialTargetUrl;
     int m_lastLoadProgress;
+    FrameFocusedObserver m_frameFocusedObserver;
 
     QUrl m_url;
     QString m_title;

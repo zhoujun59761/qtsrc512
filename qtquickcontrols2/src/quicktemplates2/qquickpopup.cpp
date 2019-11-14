@@ -1972,8 +1972,8 @@ void QQuickPopup::setOpacity(qreal opacity)
     This property holds the scale factor of the popup. The default value is \c 1.0.
 
     A scale of less than \c 1.0 causes the popup to be rendered at a smaller size,
-    and a scale greater than \c 1.0 renders the popup at a larger size. A negative
-    scale causes the popup to be mirrored when rendered.
+    and a scale greater than \c 1.0 renders the popup at a larger size. Negative
+    scales are not supported.
 */
 qreal QQuickPopup::scale() const
 {
@@ -2582,6 +2582,7 @@ void QQuickPopup::itemChange(QQuickItem::ItemChange change, const QQuickItem::It
             else
                 d->popupItem->ungrabShortcut();
         }
+        break;
     default:
         break;
     }

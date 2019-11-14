@@ -51,6 +51,31 @@
 
 namespace content {
 
+namespace {
+
+// A renderer-initiated navigation should be ignored iff a) there is an ongoing
+// request b) which is browser initiated and c) the renderer request is not
+// user-initiated.
+bool ShouldIgnoreIncomingRendererRequest(
+    NavigationRequest* ongoing_navigation_request,
+    bool has_user_gesture) {
+  return ongoing_navigation_request &&
+         ongoing_navigation_request->browser_initiated() && !has_user_gesture;
+}
+
+// Informs the RenderFrameImpl associated with the |frame_tree_node| that a
+// navigation it started was dropped.
+void DropNavigation(FrameTreeNode* frame_tree_node) {
+  if (!IsPerNavigationMojoInterfaceEnabled()) {
+    RenderFrameHost* current_frame_host =
+        frame_tree_node->render_manager()->current_frame_host();
+    current_frame_host->Send(
+        new FrameMsg_DroppedNavigation(current_frame_host->GetRoutingID()));
+  }
+}
+
+}  // namespace
+
 struct NavigatorImpl::NavigationMetricsData {
   NavigationMetricsData(base::TimeTicks start_time,
                         GURL url,
@@ -353,6 +378,9 @@ void NavigatorImpl::Navigate(std::unique_ptr<NavigationRequest> request,
                              ReloadType reload_type,
                              RestoreType restore_type) {
   TRACE_EVENT0("browser,navigation", "NavigatorImpl::Navigate");
+  TRACE_EVENT_INSTANT_WITH_TIMESTAMP0(
+      "navigation,rail", "NavigationTiming navigationStart",
+      TRACE_EVENT_SCOPE_GLOBAL, request->common_params().navigation_start);
 
   const GURL& dest_url = request->common_params().url;
   FrameTreeNode* frame_tree_node = request->frame_tree_node();
@@ -518,10 +546,12 @@ void NavigatorImpl::NavigateFromFrameProxy(
     const Referrer& referrer,
     ui::PageTransition page_transition,
     bool should_replace_current_entry,
+    NavigationDownloadPolicy download_policy,
     const std::string& method,
     scoped_refptr<network::ResourceRequestBody> post_body,
     const std::string& extra_headers,
-    scoped_refptr<network::SharedURLLoaderFactory> blob_url_loader_factory) {
+    scoped_refptr<network::SharedURLLoaderFactory> blob_url_loader_factory,
+    bool has_user_gesture) {
   // |method != "POST"| should imply absence of |post_body|.
   if (method != "POST" && post_body) {
     NOTREACHED();
@@ -562,14 +592,22 @@ void NavigatorImpl::NavigateFromFrameProxy(
     is_renderer_initiated = false;
   }
 
+  if (is_renderer_initiated &&
+      ShouldIgnoreIncomingRendererRequest(
+          render_frame_host->frame_tree_node()->navigation_request(),
+          has_user_gesture)) {
+    return;
+  }
+
   GetContentClient()->browser()->OverrideNavigationParams(
       current_site_instance, &page_transition, &is_renderer_initiated,
       &referrer_to_use);
 
   controller_->NavigateFromFrameProxy(
       render_frame_host, url, is_renderer_initiated, source_site_instance,
-      referrer_to_use, page_transition, should_replace_current_entry, method,
-      post_body, extra_headers, std::move(blob_url_loader_factory));
+      referrer_to_use, page_transition,
+      should_replace_current_entry, download_policy, method, post_body,
+      extra_headers, std::move(blob_url_loader_factory));
 }
 
 void NavigatorImpl::OnBeforeUnloadACK(FrameTreeNode* frame_tree_node,
@@ -643,18 +681,10 @@ void NavigatorImpl::OnBeginNavigation(
     frame_tree_node->ResetNavigationRequest(false, true);
   }
 
-  // The renderer-initiated navigation request is ignored iff a) there is an
-  // ongoing request b) which is browser initiated and c) the renderer request
-  // is not user-initiated.
-  if (ongoing_navigation_request &&
-      ongoing_navigation_request->browser_initiated() &&
-      !common_params.has_user_gesture) {
-    if (!IsPerNavigationMojoInterfaceEnabled()) {
-      RenderFrameHost* current_frame_host =
-          frame_tree_node->render_manager()->current_frame_host();
-      current_frame_host->Send(
-          new FrameMsg_DroppedNavigation(current_frame_host->GetRoutingID()));
-    }
+  // Verify this navigation has precedence.
+  if (ShouldIgnoreIncomingRendererRequest(ongoing_navigation_request,
+                                          common_params.has_user_gesture)) {
+    DropNavigation(frame_tree_node);
     return;
   }
 

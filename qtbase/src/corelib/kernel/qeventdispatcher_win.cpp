@@ -83,7 +83,10 @@ enum {
     WM_QT_SOCKETNOTIFIER = WM_USER,
     WM_QT_SENDPOSTEDEVENTS = WM_USER + 1,
     WM_QT_ACTIVATENOTIFIERS = WM_USER + 2,
-    SendPostedEventsWindowsTimerId = ~1u
+};
+
+enum : UINT_PTR {
+    SendPostedEventsWindowsTimerId = ~UINT_PTR(1)
 };
 
 class QEventDispatcherWin32Private;
@@ -95,7 +98,7 @@ class QEventDispatcherWin32Private;
 LRESULT QT_WIN_CALLBACK qt_internal_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp);
 
 QEventDispatcherWin32Private::QEventDispatcherWin32Private()
-    : threadId(GetCurrentThreadId()), interrupt(false), closingDown(false), internalHwnd(0),
+    : threadId(GetCurrentThreadId()), interrupt(false), internalHwnd(0),
       getMessageHook(0), serialNumber(0), lastSerialNumber(0), sendPostedEventsWindowsTimerId(0),
       wakeUps(0), activateNotifiersPosted(false), winEventNotifierActivatedEvent(NULL)
 {
@@ -278,7 +281,7 @@ LRESULT QT_WIN_CALLBACK qt_GetMessageHook(int code, WPARAM wp, LPARAM lp)
                 // no more input or timer events in the message queue, we can allow posted events to be sent normally now
                 if (d->sendPostedEventsWindowsTimerId != 0) {
                     // stop the timer to send posted events, since we now allow the WM_QT_SENDPOSTEDEVENTS message
-                    KillTimer(d->internalHwnd, d->sendPostedEventsWindowsTimerId);
+                    KillTimer(d->internalHwnd, SendPostedEventsWindowsTimerId);
                     d->sendPostedEventsWindowsTimerId = 0;
                 }
                 (void) d->wakeUps.fetchAndStoreRelease(0);
@@ -552,7 +555,7 @@ bool QEventDispatcherWin32::processEvents(QEventLoop::ProcessEventsFlags flags)
         wakeUp(); // trigger a call to sendPostedEvents()
     }
 
-    d->interrupt = false;
+    d->interrupt.store(false);
     emit awake();
 
     bool canWait;
@@ -568,7 +571,7 @@ bool QEventDispatcherWin32::processEvents(QEventLoop::ProcessEventsFlags flags)
             pHandles = &d->winEventNotifierActivatedEvent;
         }
         QVarLengthArray<MSG> processedTimers;
-        while (!d->interrupt) {
+        while (!d->interrupt.load()) {
             MSG msg;
             bool haveMessage;
 
@@ -649,7 +652,7 @@ bool QEventDispatcherWin32::processEvents(QEventLoop::ProcessEventsFlags flags)
 
         // still nothing - wait for message or signalled objects
         canWait = (!retVal
-                   && !d->interrupt
+                   && !d->interrupt.load()
                    && (flags & QEventLoop::WaitForMoreEvents));
         if (canWait) {
             emit aboutToBlock();
@@ -1016,7 +1019,7 @@ void QEventDispatcherWin32::wakeUp()
 void QEventDispatcherWin32::interrupt()
 {
     Q_D(QEventDispatcherWin32);
-    d->interrupt = true;
+    d->interrupt.store(true);
     wakeUp();
 }
 

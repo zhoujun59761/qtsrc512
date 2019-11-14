@@ -226,8 +226,8 @@ IDNSpoofChecker::IDNSpoofChecker() {
   //   - {U+0493 (ғ), U+04FB (ӻ)} => f
   //   - {U+04AB (ҫ), U+1004 (င)} => c
   //   - U+04B1 (ұ) => y
-  //   - U+03C7 (χ), U+04B3 (ҳ), U+04FD (ӽ), U+04FF (ӿ) => x
-  //   - U+0503 (ԃ) => d
+  //   - {U+03C7 (χ), U+04B3 (ҳ), U+04FD (ӽ), U+04FF (ӿ)} => x
+  //   - {U+0503 (ԃ), U+10EB (ძ)} => d
   //   - {U+050D (ԍ), U+100c (ဌ)} => g
   //   - {U+0D1F (ട), U+0E23 (ร), U+0EA3 (ຣ), U+0EAE (ຮ)} => s
   //   - U+1042 (၂) => j
@@ -251,7 +251,7 @@ IDNSpoofChecker::IDNSpoofChecker() {
           "[ŧтҭԏ] > t; [ƅьҍв] > b;  [ωшщพฟພຟ] > w;"
           "[мӎ] > m; [єҽҿၔ] > e; ґ > r; [ғӻ] > f;"
           "[ҫင] > c; ұ > y; [χҳӽӿ] > x;"
-          "ԃ  > d; [ԍဌ] > g; [ടรຣຮ] > s; ၂ > j;"
+          "[ԃძ]  > d; [ԍဌ] > g; [ടรຣຮ] > s; ၂ > j;"
           "[०০੦૦ଠ୦೦] > o;"
           "[৭੧૧] > q;"
           "[บບ] > u;"
@@ -259,8 +259,7 @@ IDNSpoofChecker::IDNSpoofChecker() {
           "[зҙӡउওਤ੩૩౩ဒვპ] > 3;"
           "[੫] > 4;"
           "[৪੪୫] > 8;"
-          "[૭୨౨] > 9;"
-      ),
+          "[૭୨౨] > 9;"),
       UTRANS_FORWARD, parse_error, status));
   DCHECK(U_SUCCESS(status))
       << "Spoofchecker initalization failed due to an error: "
@@ -354,6 +353,7 @@ bool IDNSpoofChecker::SafeToDisplayAsUnicode(base::StringPiece16 label,
     //   character. Other combining diacritical marks are not in the allowed
     //   character set.
     // - Disallow dotless i (U+0131) followed by a combining mark.
+    // - Disallow combining Kana voiced sound marks.
     // - Disallow U+0307 (dot above) after 'i', 'j', 'l' or dotless i (U+0131).
     //   Dotless j (U+0237) is not in the allowed set to begin with.
     dangerous_pattern = new icu::RegexMatcher(
@@ -368,6 +368,7 @@ bool IDNSpoofChecker::SafeToDisplayAsUnicode(base::StringPiece16 label,
             R"([a-z]\u30fb|\u30fb[a-z]|)"
             R"([^\p{scx=latn}\p{scx=grek}\p{scx=cyrl}][\u0300-\u0339]|)"
             R"(\u0131[\u0300-\u0339]|)"
+            R"(\u3099|\u309A|)"
             R"([ijl]\u0307)",
             -1, US_INV),
         0, status);
@@ -481,6 +482,9 @@ void IDNSpoofChecker::SetAllowedUnicodeSet(UErrorCode* status) {
 
   // Block modifier letter voicing.
   allowed_set.remove(0x2ecu);
+
+  // Block historic character Latin Kra (also blocked by Mozilla).
+  allowed_set.remove(0x0138);
 
   // No need to block U+144A (Canadian Syllabics West-Cree P) separately
   // because it's blocked from mixing with other scripts including Latin.

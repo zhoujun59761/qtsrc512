@@ -90,7 +90,7 @@ public:
     QQuickWebEngineView *q_ptr;
     QQuickWebEngineViewPrivate();
     ~QQuickWebEngineViewPrivate();
-    void destroy();
+    void releaseProfile() override;
     void initializeProfile();
     QtWebEngineCore::UIDelegatesManager *ui();
 
@@ -130,7 +130,7 @@ public:
     void didFindText(quint64, int) override;
     void didPrintPage(quint64 requestId, const QByteArray &result) override;
     void didPrintPageToPdf(const QString &filePath, bool success) override;
-    void passOnFocus(bool reverse) override;
+    bool passOnFocus(bool reverse) override;
     void javaScriptConsoleMessage(JavaScriptConsoleMessageLevel level, const QString& message, int lineNumber, const QString& sourceID) override;
     void authenticationRequired(QSharedPointer<QtWebEngineCore::AuthenticationDialogController>) override;
     void runMediaAccessPermissionRequest(const QUrl &securityOrigin, MediaRequestFlags requestFlags) override;
@@ -147,6 +147,7 @@ public:
     void updateScrollPosition(const QPointF &position) override;
     void updateContentsSize(const QSizeF &size) override;
     void updateNavigationActions() override;
+    void updateEditActions() override;
     void startDragging(const content::DropData &dropData, Qt::DropActions allowedActions,
                        const QPixmap &pixmap, const QPoint &offset) override;
     bool supportsDragging() const override;

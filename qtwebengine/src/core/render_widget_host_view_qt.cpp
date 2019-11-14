@@ -41,6 +41,7 @@
 
 #include "browser_accessibility_manager_qt.h"
 #include "chromium_overrides.h"
+#include "common/qt_messages.h"
 #include "compositor.h"
 #include "qtwebenginecoreglobal_p.h"
 #include "render_widget_host_view_qt_delegate.h"
@@ -455,6 +456,7 @@ void RenderWidgetHostViewQt::UpdateBackgroundColor()
     auto color = GetBackgroundColor();
     if (color) {
         m_delegate->setClearColor(toQt(*color));
+        host()->Send(new RenderViewObserverQt_SetBackgroundColor(host()->GetRoutingID(), *color));
     }
 }
 
@@ -1124,7 +1126,7 @@ void RenderWidgetHostViewQt::closePopup()
     // (hiding the widget and automatic memory cleanup via
     // RenderWidget::CloseWidgetSoon() -> RenderWidgetHostImpl::ShutdownAndDestroyWidget(true).
     host()->SetActive(false);
-    host()->Blur();
+    host()->LostFocus();
 }
 
 void RenderWidgetHostViewQt::ProcessAckedTouchEvent(const content::TouchEventWithLatencyInfo &touch, content::InputEventAckState ack_result) {
@@ -1644,7 +1646,7 @@ void RenderWidgetHostViewQt::handleFocusEvent(QFocusEvent *ev)
         ev->accept();
     } else if (ev->lostFocus()) {
         host()->SetActive(false);
-        host()->Blur();
+        host()->LostFocus();
         ev->accept();
     }
 }

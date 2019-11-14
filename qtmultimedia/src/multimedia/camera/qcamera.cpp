@@ -362,9 +362,17 @@ QCamera::QCamera(const QByteArray& deviceName, QObject *parent):
 
     // The camera should not be used if device with requested name does not exist.
     if (!found) {
-        if (d->service && d->control)
-            d->service->releaseControl(d->control);
+        if (d->service) {
+            if (d->control)
+                d->service->releaseControl(d->control);
+            if (d->deviceControl)
+                d->service->releaseControl(d->deviceControl);
+            if (d->infoControl)
+                d->service->releaseControl(d->infoControl);
+        }
         d->control = nullptr;
+        d->deviceControl = nullptr;
+        d->infoControl = nullptr;
         d->error = QCamera::ServiceMissingError;
         d->errorString = QCamera::tr("The camera service is missing");
     }
@@ -636,7 +644,7 @@ void QCamera::setViewfinderSettings(const QCameraViewfinderSettings &settings)
     If \a settings is non null, the returned list is reduced to settings matching the given partial
     \a settings.
 
-    The camera must be loaded before calling this function, otherwise the returned list
+    The status of the camera must be LoadedStatus before calling this function, otherwise the returned list
     is empty.
 
     \sa setViewfinderSettings(), supportedViewfinderResolutions(), supportedViewfinderFrameRateRanges(),

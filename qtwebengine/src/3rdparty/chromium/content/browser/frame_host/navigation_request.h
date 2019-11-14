@@ -32,7 +32,6 @@ namespace content {
 
 class FrameNavigationEntry;
 class FrameTreeNode;
-class NavigationControllerImpl;
 class NavigationHandleImpl;
 class NavigationURLLoader;
 class NavigationData;
@@ -80,19 +79,19 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
   };
 
   // Creates a request for a browser-intiated navigation.
+  // Note: this is sometimes called for renderer-initiated navigations going
+  // through the OpenURL path. |browser_initiated| should be false in that case.
+  // TODO(clamy): Rename this function and consider merging it with
+  // CreateRendererInitiated.
   static std::unique_ptr<NavigationRequest> CreateBrowserInitiated(
       FrameTreeNode* frame_tree_node,
-      const GURL& dest_url,
-      const Referrer& dest_referrer,
+      const CommonNavigationParams& common_params,
+      const RequestNavigationParams& request_params,
+      bool browser_initiated,
+      const std::string& extra_headers,
       const FrameNavigationEntry& frame_entry,
       const NavigationEntryImpl& entry,
-      FrameMsg_Navigate_Type::Value navigation_type,
-      PreviewsState previews_state,
-      bool is_same_document_history_load,
-      bool is_history_navigation_in_new_child,
       const scoped_refptr<network::ResourceRequestBody>& post_body,
-      const base::TimeTicks& navigation_start,
-      NavigationControllerImpl* controller,
       std::unique_ptr<NavigationUIData> navigation_ui_data);
 
   // Creates a request for a renderer-intiated navigation.
@@ -185,6 +184,15 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
     on_start_checks_complete_closure_ = closure;
   }
 
+  bool from_download_cross_origin_redirect() const {
+    return from_download_cross_origin_redirect_;
+  }
+
+  void set_from_download_cross_origin_redirect(
+      bool from_download_cross_origin_redirect) {
+    from_download_cross_origin_redirect_ = from_download_cross_origin_redirect;
+  }
+
   int nav_entry_id() const { return nav_entry_id_; }
 
   // For automation driver-initiated navigations over the devtools protocol,
@@ -236,6 +244,7 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
       std::unique_ptr<NavigationData> navigation_data,
       const GlobalRequestID& request_id,
       bool is_download,
+      NavigationDownloadPolicy download_policy,
       bool is_stream,
       base::Optional<SubresourceLoaderParams> subresource_loader_params)
       override;
@@ -450,6 +459,10 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
   // TODO(clamy, ahemery): Extend to all types of navigation.
   // Only valid when PerNavigationMojoInterface is enabled.
   mojom::NavigationClientAssociatedPtr commit_navigation_client_;
+
+  // Whether this navigation was triggered by a x-origin redirect following a
+  // prior (most likely <a download>) download attempt.
+  bool from_download_cross_origin_redirect_ = false;
 
   // If set, any redirects to HTTP for this navigation will be upgraded to
   // HTTPS. This is used only on subframe navigations, when

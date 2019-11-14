@@ -356,11 +356,23 @@ private slots:
     void callPropertyOnUndefined();
     void jumpStrictNotEqualUndefined();
     void removeBindingsWithNoDependencies();
+    void preserveBindingWithUnresolvedNames();
     void temporaryDeadZone();
     void importLexicalVariables_data();
     void importLexicalVariables();
     void hugeObject();
     void templateStringTerminator();
+    void arrayAndException();
+    void numberToStringWithRadix();
+    void tailCallWithArguments();
+    void deleteSparseInIteration();
+    void saveAccumulatorBeforeToInt32();
+    void intMinDividedByMinusOne();
+    void undefinedPropertiesInObjectWrapper();
+    void hugeRegexpQuantifiers();
+    void singletonTypeWrapperLookup();
+    void getThisObject();
+    void semicolonAfterProperty();
 
 private:
 //    static void propertyVarWeakRefCallback(v8::Persistent<v8::Value> object, void* parameter);
@@ -1604,7 +1616,7 @@ void tst_qqmlecmascript::aliasPropertyReset()
 
     // test that a manual write (of undefined) to a non-resettable property fails properly
     QUrl url = testFileUrl("aliasreset/aliasPropertyReset.error.1.qml");
-    QString warning1 = url.toString() + QLatin1String(": Error: Cannot assign [undefined] to int");
+    QString warning1 = url.toString() + QLatin1String(":15: Error: Cannot assign [undefined] to int");
     QQmlComponent e1(&engine, url);
     object = e1.create();
     QVERIFY(object != nullptr);
@@ -6463,7 +6475,8 @@ void tst_qqmlecmascript::signalHandlers()
 
     QMetaObject::invokeMethod(o.data(), "testSignalHandlerCall");
     QCOMPARE(o->property("count").toInt(), 1);
-    QCOMPARE(o->property("errorString").toString(), QLatin1String("TypeError: Property 'onTestSignal' of object [object Object] is not a function"));
+    QString scopeObjectAsString = o->property("scopeObjectAsString").toString();
+    QCOMPARE(o->property("errorString").toString(), QString("TypeError: Property 'onTestSignal' of object %1 is not a function").arg(scopeObjectAsString));
 
     QCOMPARE(o->property("funcCount").toInt(), 0);
     QMetaObject::invokeMethod(o.data(), "testSignalConnection");
@@ -8158,12 +8171,11 @@ void tst_qqmlecmascript::stackLimits()
 void tst_qqmlecmascript::idsAsLValues()
 {
     QQmlEngine engine;
-    QString err = QString(QLatin1String("%1:5 left-hand side of assignment operator is not an lvalue\n")).arg(testFileUrl("idAsLValue.qml").toString());
+    QString err = QString(QLatin1String("%1:5: Error: left-hand side of assignment operator is not an lvalue")).arg(testFileUrl("idAsLValue.qml").toString());
     QQmlComponent component(&engine, testFileUrl("idAsLValue.qml"));
-    QTest::ignoreMessage(QtWarningMsg, "QQmlComponent: Component is not ready");
+    QTest::ignoreMessage(QtWarningMsg, qPrintable(err));
     MyQmlObject *object = qobject_cast<MyQmlObject*>(component.create());
     QVERIFY(!object);
-    QCOMPARE(component.errorString(), err);
 }
 
 void tst_qqmlecmascript::qtbug_34792()
@@ -8805,6 +8817,18 @@ void tst_qqmlecmascript::removeBindingsWithNoDependencies()
 
 }
 
+void tst_qqmlecmascript::preserveBindingWithUnresolvedNames()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("preserveBindingWithUnresolvedNames.qml"));
+    QScopedPointer<QObject> object(component.create());
+    QVERIFY(!object.isNull());
+    QCOMPARE(object->property("testTypeOf").toString(), QString("undefined"));
+    QObject obj;
+    engine.rootContext()->setContextProperty("contextProp", &obj);
+    QCOMPARE(object->property("testTypeOf").toString(), QString("object"));
+}
+
 void tst_qqmlecmascript::temporaryDeadZone()
 {
     QJSEngine engine;
@@ -8867,6 +8891,178 @@ void tst_qqmlecmascript::templateStringTerminator()
     const QJSValue value = engine.evaluate("let a = 123; let b = `x${a}\ny^`; b;");
     QVERIFY(!value.isError());
     QCOMPARE(value.toString(), QLatin1String("x123\ny^"));
+}
+
+void tst_qqmlecmascript::arrayAndException()
+{
+    QJSEngine engine;
+    const QJSValue value = engine.evaluate("[...[],[,,$]]");
+    // Should not crash
+    QVERIFY(value.isError());
+}
+
+void tst_qqmlecmascript::numberToStringWithRadix()
+{
+    QJSEngine engine;
+    {
+        const QJSValue value = engine.evaluate(".5.toString(5)");
+        QVERIFY(!value.isError());
+        QVERIFY(value.toString().startsWith("0.2222222222"));
+    }
+    {
+        const QJSValue value = engine.evaluate(".05.toString(5)");
+        QVERIFY(!value.isError());
+        QVERIFY(value.toString().startsWith("0.01111111111"));
+    }
+}
+
+void tst_qqmlecmascript::tailCallWithArguments()
+{
+    QJSEngine engine;
+    const QJSValue value = engine.evaluate(
+            "'use strict';\n"
+            "[[1, 2]].map(function (a) {\n"
+            "    return (function() { return Math.min.apply(this, arguments); })(a[0], a[1]);\n"
+            "})[0];");
+    QVERIFY(!value.isError());
+    QCOMPARE(value.toInt(), 1);
+}
+
+void tst_qqmlecmascript::deleteSparseInIteration()
+{
+    QJSEngine engine;
+    const QJSValue value = engine.evaluate(
+            "(function() {\n"
+            "    var obj = { 1: null, 2: null, 4096: null };\n"
+            "    var iterated = [];\n"
+            "    for (var t in obj) {\n"
+            "        if (t == 2)\n"
+            "            delete obj[t];\n"
+            "        iterated.push(t);\n"
+            "    }\n"
+            "    return iterated;"
+            "})()");
+    QVERIFY(value.isArray());
+    QCOMPARE(value.property("length").toInt(), 3);
+    QCOMPARE(value.property("0").toInt(), 1);
+    QCOMPARE(value.property("1").toInt(), 2);
+    QCOMPARE(value.property("2").toInt(), 4096);
+}
+
+void tst_qqmlecmascript::saveAccumulatorBeforeToInt32()
+{
+    QJSEngine engine;
+
+    // Infinite recursion produces a range error, but should not crash.
+    // Also, any GC runs in between should not trash the temporary results of "a+a".
+    const QJSValue value = engine.evaluate("function a(){a(a&a+a)}a()");
+    QVERIFY(value.isError());
+    QCOMPARE(value.toString(), QLatin1String("RangeError: Maximum call stack size exceeded."));
+}
+
+void tst_qqmlecmascript::intMinDividedByMinusOne()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(QByteArray("import QtQml 2.2\n"
+                                 "QtObject {\n"
+                                 "   property int intMin: -2147483648\n"
+                                 "   property int minusOne: -1\n"
+                                 "   property double doesNotFitInInt: intMin / minusOne\n"
+                                 "}"), QUrl());
+    QVERIFY(component.isReady());
+    QScopedPointer<QObject> object(component.create());
+    QVERIFY(!object.isNull());
+    QCOMPARE(object->property("doesNotFitInInt").toUInt(), 2147483648u);
+}
+
+void tst_qqmlecmascript::undefinedPropertiesInObjectWrapper()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFile("undefinedPropertiesInObjectWrapper.qml"));
+    QVERIFY(component.isReady());
+    QScopedPointer<QObject> object(component.create());
+    QVERIFY(!object.isNull());
+}
+
+void tst_qqmlecmascript::hugeRegexpQuantifiers()
+{
+    QJSEngine engine;
+    QJSValue value = engine.evaluate("/({3072140529})?{3072140529}/");
+
+    // It's a regular expression, but it won't match anything.
+    // The RegExp compiler also shouldn't crash.
+    QVERIFY(value.isRegExp());
+}
+
+struct CppSingleton1 : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int testVar MEMBER testVar CONSTANT)
+public:
+    const int testVar = 0;
+};
+
+struct CppSingleton2 : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int testVar MEMBER testVar CONSTANT)
+public:
+    const int testVar = 1;
+};
+
+void tst_qqmlecmascript::singletonTypeWrapperLookup()
+{
+    QQmlEngine engine;
+
+    auto singletonTypeId1 = qmlRegisterSingletonType<CppSingleton1>("Test.Singletons", 1, 0, "CppSingleton1",
+                                                                    [](QQmlEngine *, QJSEngine *) -> QObject * {
+            return new CppSingleton1;
+    });
+
+    auto singletonTypeId2 = qmlRegisterSingletonType<CppSingleton2>("Test.Singletons", 1, 0, "CppSingleton2",
+                                                                    [](QQmlEngine *, QJSEngine *) -> QObject * {
+            return new CppSingleton2;
+    });
+
+    auto cleanup = qScopeGuard([&]() {
+       qmlUnregisterType(singletonTypeId1);
+       qmlUnregisterType(singletonTypeId2);
+    });
+
+    QQmlComponent component(&engine, testFileUrl("SingletonLookupTest.qml"));
+    QScopedPointer<QObject> test(component.create());
+    QVERIFY2(!test.isNull(), qPrintable(component.errorString()));
+
+    auto singleton1 = engine.singletonInstance<CppSingleton1*>(singletonTypeId1);
+    QVERIFY(singleton1);
+
+    auto singleton2 = engine.singletonInstance<CppSingleton2*>(singletonTypeId2);
+    QVERIFY(singleton2);
+
+    QCOMPARE(test->property("firstLookup").toInt(), singleton1->testVar);
+    QCOMPARE(test->property("secondLookup").toInt(), singleton2->testVar);
+}
+
+void tst_qqmlecmascript::getThisObject()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("getThis.qml"));
+    QVERIFY(component.isReady());
+    QScopedPointer<QObject> test(component.create());
+    QVERIFY(!test.isNull());
+
+    QTRY_COMPARE(qvariant_cast<QObject *>(test->property("self")), test.data());
+}
+
+// QTBUG-77954
+void tst_qqmlecmascript::semicolonAfterProperty()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("semicolonAfterProperty.qml"));
+    QVERIFY(component.isReady());
+    QScopedPointer<QObject> test(component.create());
+    QVERIFY(!test.isNull());
 }
 
 QTEST_MAIN(tst_qqmlecmascript)

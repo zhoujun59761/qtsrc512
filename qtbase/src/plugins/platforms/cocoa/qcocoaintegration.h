@@ -144,6 +144,7 @@ private:
 #endif
     QScopedPointer<QPlatformTheme> mPlatformTheme;
     QList<QCocoaScreen *> mScreens;
+    QMacNotificationObserver m_screensObserver;
 #ifndef QT_NO_CLIPBOARD
     QCocoaClipboard  *mCocoaClipboard;
 #endif

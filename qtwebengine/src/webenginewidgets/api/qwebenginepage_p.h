@@ -126,9 +126,10 @@ public:
     void didFindText(quint64 requestId, int matchCount) override;
     void didPrintPage(quint64 requestId, const QByteArray &result) override;
     void didPrintPageToPdf(const QString &filePath, bool success) override;
-    void passOnFocus(bool reverse) override;
+    bool passOnFocus(bool reverse) override;
     void javaScriptConsoleMessage(JavaScriptConsoleMessageLevel level, const QString& message, int lineNumber, const QString& sourceID) override;
     void authenticationRequired(QSharedPointer<QtWebEngineCore::AuthenticationDialogController>) override;
+    void releaseProfile() override;
     void runMediaAccessPermissionRequest(const QUrl &securityOrigin, MediaRequestFlags requestFlags) override;
     void runGeolocationPermissionRequest(const QUrl &securityOrigin) override;
     void runMouseLockPermissionRequest(const QUrl &securityOrigin) override;
@@ -143,6 +144,7 @@ public:
     void updateScrollPosition(const QPointF &position) override;
     void updateContentsSize(const QSizeF &size) override;
     void updateNavigationActions() override;
+    void updateEditActions() override;
     void startDragging(const content::DropData &dropData, Qt::DropActions allowedActions,
                        const QPixmap &pixmap, const QPoint &offset) override;
     bool supportsDragging() const override;

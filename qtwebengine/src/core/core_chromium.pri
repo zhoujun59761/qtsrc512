@@ -33,8 +33,6 @@ RCC_DIR = $$OUT_PWD/$$getConfigDir()/.rcc
 # whenever we are cross compiling.
 qtConfig(webengine-embedded-build): DEFINES += QTWEBENGINE_EMBEDDED_SWITCHES
 
-qtConfig(egl): CONFIG += egl
-
 INCLUDEPATH += $$PWD $$PWD/api
 
 SOURCES = \
@@ -221,7 +219,7 @@ HEADERS = \
         web_event_factory.h
 
 
-qtConfig(webengine-system-x11): hasX11Dependencies() {
+qtConfig(webengine-ozone-x11) {
     HEADERS += ozone/gl_ozone_glx_qt.h \
                ozone/gl_surface_glx_qt.h
     SOURCES += ozone/gl_surface_glx_qt.cpp \

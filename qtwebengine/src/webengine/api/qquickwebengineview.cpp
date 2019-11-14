@@ -189,7 +189,7 @@ bool QQuickWebEngineViewPrivate::profileInitialized() const
     return m_profileInitialized;
 }
 
-void QQuickWebEngineViewPrivate::destroy()
+void QQuickWebEngineViewPrivate::releaseProfile()
 {
     // The profile for this web contents is about to be
     // garbage collected, delete WebContents first and
@@ -294,7 +294,7 @@ void QQuickWebEngineViewPrivate::allowCertificateError(const QSharedPointer<Cert
     // mark the object for gc by creating temporary jsvalue
     qmlEngine(q)->newQObject(quickController);
     Q_EMIT q->certificateError(quickController);
-    if (!quickController->deferred() && !quickController->answered())
+    if (!quickController->overridable() || (!quickController->deferred() && !quickController->answered()))
         quickController->rejectCertificate();
     else
         m_certificateErrorControllers.append(errorController);
@@ -333,12 +333,16 @@ void QQuickWebEngineViewPrivate::runFileChooser(QSharedPointer<FilePickerControl
         ui()->showFilePicker(controller);
 }
 
-void QQuickWebEngineViewPrivate::passOnFocus(bool reverse)
+bool QQuickWebEngineViewPrivate::passOnFocus(bool reverse)
 {
     Q_Q(QQuickWebEngineView);
     // The child delegate currently has focus, find the next one from there and give it focus.
     QQuickItem *next = q->scopedFocusItem()->nextItemInFocusChain(!reverse);
-    next->forceActiveFocus(reverse ? Qt::BacktabFocusReason : Qt::TabFocusReason);
+    if (next) {
+        next->forceActiveFocus(reverse ? Qt::BacktabFocusReason : Qt::TabFocusReason);
+        return true;
+    }
+    return false;
 }
 
 void QQuickWebEngineViewPrivate::titleChanged(const QString &title)
@@ -927,6 +931,16 @@ void QQuickWebEngineViewPrivate::updateAction(QQuickWebEngineView::WebAction act
     case QQuickWebEngineView::ViewSource:
         enabled = adapter->canViewSource();
         break;
+    case QQuickWebEngineView::Cut:
+    case QQuickWebEngineView::Copy:
+    case QQuickWebEngineView::Paste:
+    case QQuickWebEngineView::Undo:
+    case QQuickWebEngineView::Redo:
+    case QQuickWebEngineView::SelectAll:
+    case QQuickWebEngineView::PasteAndMatchStyle:
+    case QQuickWebEngineView::Unselect:
+        enabled = adapter->hasFocusedFrame();
+        break;
     default:
         break;
     }
@@ -942,6 +956,18 @@ void QQuickWebEngineViewPrivate::updateNavigationActions()
     updateAction(QQuickWebEngineView::Reload);
     updateAction(QQuickWebEngineView::ReloadAndBypassCache);
     updateAction(QQuickWebEngineView::ViewSource);
+}
+
+void QQuickWebEngineViewPrivate::updateEditActions()
+{
+    updateAction(QQuickWebEngineView::Cut);
+    updateAction(QQuickWebEngineView::Copy);
+    updateAction(QQuickWebEngineView::Paste);
+    updateAction(QQuickWebEngineView::Undo);
+    updateAction(QQuickWebEngineView::Redo);
+    updateAction(QQuickWebEngineView::SelectAll);
+    updateAction(QQuickWebEngineView::PasteAndMatchStyle);
+    updateAction(QQuickWebEngineView::Unselect);
 }
 
 QUrl QQuickWebEngineView::url() const
@@ -1277,7 +1303,7 @@ void QQuickWebEngineView::setBackgroundColor(const QColor &color)
 
 /*!
     \property QQuickWebEngineView::audioMuted
-    \brief the state of whether the current page audio is muted.
+    \brief The state of whether the current page audio is muted.
     \since 5.7
 
     The default value is false.

@@ -900,7 +900,7 @@ bool readInputFile(Options *options)
             options->extraPlugins = extraPlugins.toString().split(QLatin1Char(','));
     }
 
-    if (!options->auxMode) {
+    {
         const QJsonValue stdcppPath = jsonObject.value(QStringLiteral("stdcpp-path"));
         if (stdcppPath.isUndefined()) {
             fprintf(stderr, "No stdcpp-path defined in json file.\n");
@@ -1261,7 +1261,7 @@ bool updateStringsXml(const Options &options)
             fprintf(stderr, "Can't open %s for writing.\n", qPrintable(fileName));
             return false;
         }
-        file.write(QByteArray("<?xml version='1.0' encoding='utf-8'?><resources><string name=\"app_name\">")
+        file.write(QByteArray("<?xml version='1.0' encoding='utf-8'?><resources><string name=\"app_name\" translatable=\"false\">")
                    .append(QFileInfo(options.applicationBinary).baseName().mid(sizeof("lib") - 1).toLatin1())
                    .append("</string></resources>\n"));
         return true;
@@ -1722,7 +1722,7 @@ bool scanImports(Options *options, QSet<QString> *usedDependencies)
 
     QStringList importPaths;
     importPaths += shellQuote(options->qtInstallDirectory + QLatin1String("/qml"));
-    importPaths += rootPath;
+    importPaths += shellQuote(rootPath);
     for (const QString &qmlImportPath : qAsConst(options->qmlImportPaths))
         importPaths += shellQuote(qmlImportPath);
 
@@ -2898,6 +2898,8 @@ int main(int argc, char *argv[])
             return CannotCopyQtFiles;
         if (!copyAndroidExtraResources(options))
             return CannotCopyAndroidExtraResources;
+        if (!copyAndroidExtraLibs(options))
+            return CannotCopyAndroidExtraLibs;
         if (!stripLibraries(options))
             return CannotStripLibraries;
         if (!updateAndroidFiles(options))

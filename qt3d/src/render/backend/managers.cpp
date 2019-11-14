@@ -72,7 +72,11 @@ FrameGraphNode* FrameGraphManager::lookupNode(Qt3DCore::QNodeId id) const
 
 void FrameGraphManager::releaseNode(Qt3DCore::QNodeId id)
 {
-    delete m_nodes.take(id);
+    auto node = m_nodes.take(id);
+    if (node) {
+        node->cleanup();
+        delete node;
+    }
 }
 
 void SkeletonManager::addDirtySkeleton(DirtyFlag dirtyFlag, HSkeleton skeletonHandle)
@@ -104,6 +108,12 @@ void JointManager::addDirtyJoint(Qt3DCore::QNodeId jointId)
 {
     const HJoint jointHandle = lookupHandle(jointId);
     m_dirtyJoints.push_back(jointHandle);
+}
+
+void JointManager::removeDirtyJoint(Qt3DCore::QNodeId jointId)
+{
+    const HJoint jointHandle = lookupHandle(jointId);
+    m_dirtyJoints.removeAll(jointHandle);
 }
 
 QVector<HJoint> JointManager::dirtyJoints()

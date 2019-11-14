@@ -63,11 +63,13 @@ struct QQmlValueTypeFactoryImpl
     QQmlValueType *valueTypes[QVariant::UserType];
     QHash<int, QQmlValueType *> userTypes;
     QMutex mutex;
+
+    QQmlValueType invalidValueType;
 };
 
 QQmlValueTypeFactoryImpl::QQmlValueTypeFactoryImpl()
 {
-    std::fill_n(valueTypes, int(QVariant::UserType), nullptr);
+    std::fill_n(valueTypes, int(QVariant::UserType), &invalidValueType);
 
     // See types wrapped in qqmlmodelindexvaluetype_p.h
     qRegisterMetaType<QItemSelectionRange>();
@@ -75,25 +77,38 @@ QQmlValueTypeFactoryImpl::QQmlValueTypeFactoryImpl()
 
 QQmlValueTypeFactoryImpl::~QQmlValueTypeFactoryImpl()
 {
-    qDeleteAll(valueTypes, valueTypes + QVariant::UserType);
+    for (QQmlValueType *type : valueTypes) {
+        if (type != &invalidValueType)
+            delete type;
+    }
     qDeleteAll(userTypes);
+}
+
+bool isInternalType(int idx)
+{
+    // Qt internal types
+    switch (idx) {
+    case QMetaType::UnknownType:
+    case QMetaType::QStringList:
+    case QMetaType::QObjectStar:
+    case QMetaType::VoidStar:
+    case QMetaType::Nullptr:
+    case QMetaType::QVariant:
+    case QMetaType::QLocale:
+    case QMetaType::QImage:  // scarce type, keep as QVariant
+    case QMetaType::QPixmap: // scarce type, keep as QVariant
+        return true;
+    default:
+        return false;
+    }
 }
 
 bool QQmlValueTypeFactoryImpl::isValueType(int idx)
 {
-    if (idx >= (int)QVariant::UserType) {
-        return (valueType(idx) != nullptr);
-    } else if (idx >= 0
-            && idx != QVariant::StringList
-            && idx != QMetaType::QObjectStar
-            && idx != QMetaType::VoidStar
-            && idx != QMetaType::Nullptr
-            && idx != QMetaType::QVariant
-            && idx != QMetaType::QLocale) {
-        return true;
-    }
+    if (idx < 0 || isInternalType(idx))
+        return false;
 
-    return false;
+    return valueType(idx) != nullptr;
 }
 
 const QMetaObject *QQmlValueTypeFactoryImpl::metaObjectForMetaType(int t)
@@ -151,15 +166,17 @@ QQmlValueType *QQmlValueTypeFactoryImpl::valueType(int idx)
     }
 
     QQmlValueType *rv = valueTypes[idx];
-    if (!rv) {
+    if (rv == &invalidValueType) {
         // No need for mutex protection - the most we can lose is a valueType instance
 
         // TODO: Investigate the performance/memory characteristics of
         // removing the preallocated array
-        if (const QMetaObject *mo = metaObjectForMetaType(idx)) {
-            rv = new QQmlValueType(idx, mo);
-            valueTypes[idx] = rv;
-        }
+        if (isInternalType(idx))
+            rv = valueTypes[idx] = nullptr;
+        else if (const QMetaObject *mo = metaObjectForMetaType(idx))
+            rv = valueTypes[idx] = new QQmlValueType(idx, mo);
+        else
+            rv = valueTypes[idx] = nullptr;
     }
 
     return rv;
@@ -189,6 +206,13 @@ void QQmlValueTypeFactory::registerValueTypes(const char *uri, int versionMajor,
     qmlRegisterValueTypeEnums<QQmlEasingValueType>(uri, versionMajor, versionMinor, "Easing");
 }
 
+QQmlValueType::QQmlValueType() :
+    _metaObject(nullptr),
+    gadgetPtr(nullptr),
+    metaType(QMetaType::UnknownType)
+{
+}
+
 QQmlValueType::QQmlValueType(int typeId, const QMetaObject *gadgetMetaObject)
     : gadgetPtr(QMetaType::create(typeId))
     , typeId(typeId)
@@ -207,7 +231,7 @@ QQmlValueType::QQmlValueType(int typeId, const QMetaObject *gadgetMetaObject)
 QQmlValueType::~QQmlValueType()
 {
     QObjectPrivate *op = QObjectPrivate::get(this);
-    Q_ASSERT(op->metaObject == this);
+    Q_ASSERT(op->metaObject == nullptr || op->metaObject == this);
     op->metaObject = nullptr;
     ::free(const_cast<QMetaObject *>(_metaObject));
     metaType.destroy(gadgetPtr);

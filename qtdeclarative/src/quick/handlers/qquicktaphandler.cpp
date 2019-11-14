@@ -229,7 +229,7 @@ void QQuickTapHandler::timerEvent(QTimerEvent *event)
            will not take the exclusive grab, but merely a passive grab.
 
     \value TapHandler.WithinBounds
-           If the event point leaves the bounds of the \l parent Item, the tap
+           If the event point leaves the bounds of the \c parent Item, the tap
            gesture is canceled. The TapHandler will take the exclusive grab on
            press, but will release the grab as soon as the boundary constraint
            is no longer satisfied.
@@ -237,7 +237,7 @@ void QQuickTapHandler::timerEvent(QTimerEvent *event)
     \value TapHandler.ReleaseWithinBounds
            At the time of release (the mouse button is released or the finger
            is lifted), if the event point is outside the bounds of the
-           \l parent Item, a tap gesture is not recognized. This corresponds to
+           \c parent Item, a tap gesture is not recognized. This corresponds to
            typical behavior for button widgets: you can cancel a click by
            dragging outside the button, and you can also change your mind by
            dragging back inside the button before release. Note that it's
@@ -380,45 +380,58 @@ void QQuickTapHandler::updateTimeHeld()
 */
 
 /*!
-    \qmlsignal QtQuick::TapHandler::tapped
+    \qmlsignal QtQuick::TapHandler::tapped(EventPoint eventPoint)
 
-    This signal is emitted each time the \l parent Item is tapped.
+    This signal is emitted each time the \c parent Item is tapped.
 
     That is, if you press and release a touchpoint or button within a time
     period less than \l longPressThreshold, while any movement does not exceed
     the drag threshold, then the \c tapped signal will be emitted at the time
-    of release.
+    of release.  The \c eventPoint signal parameter contains information
+    from the release event about the point that was tapped:
+
+    \snippet pointerHandlers/tapHandlerOnTapped.qml 0
 */
 
 /*!
-    \qmlsignal QtQuick::TapHandler::singleTapped
+    \qmlsignal QtQuick::TapHandler::singleTapped(EventPoint eventPoint)
     \since 5.11
 
-    This signal is emitted when the \l parent Item is tapped once.
+    This signal is emitted when the \c parent Item is tapped once.
     After an amount of time greater than QStyleHints::mouseDoubleClickInterval,
     it can be tapped again; but if the time until the next tap is less,
-    \l tapCount will increase.
+    \l tapCount will increase. The \c eventPoint signal parameter contains
+    information from the release event about the point that was tapped.
 */
 
 /*!
-    \qmlsignal QtQuick::TapHandler::doubleTapped
+    \qmlsignal QtQuick::TapHandler::doubleTapped(EventPoint eventPoint)
     \since 5.11
 
-    This signal is emitted when the \l parent Item is tapped twice within a
+    This signal is emitted when the \c parent Item is tapped twice within a
     short span of time (QStyleHints::mouseDoubleClickInterval) and distance
     (QPlatformTheme::MouseDoubleClickDistance or
     QPlatformTheme::TouchDoubleTapDistance). This signal always occurs after
-    \l singleTapped, \l tapped, and \l tapCountChanged.
+    \l singleTapped, \l tapped, and \l tapCountChanged. The \c eventPoint
+    signal parameter contains information from the release event about the
+    point that was tapped.
 */
 
 /*!
     \qmlsignal QtQuick::TapHandler::longPressed
 
-    This signal is emitted when the \l parent Item is pressed and held for a
+    This signal is emitted when the \c parent Item is pressed and held for a
     time period greater than \l longPressThreshold. That is, if you press and
     hold a touchpoint or button, while any movement does not exceed the drag
     threshold, then the \c longPressed signal will be emitted at the time that
     \l timeHeld exceeds \l longPressThreshold.
 */
 
+/*!
+    \qmlsignal QtQuick::TapHandler::tapCountChanged
+
+    This signal is emitted when the \c parent Item is tapped once or more (within
+    a specified time and distance span) and when the present \c tapCount differs
+    from the previous \c tapCount.
+*/
 QT_END_NAMESPACE
