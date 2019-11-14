@@ -215,7 +215,6 @@ struct Context {
     bool usesThis = false;
     bool innerFunctionAccessesThis = false;
     bool innerFunctionAccessesNewTarget = false;
-    bool hasTry = false;
     bool returnsClosure = false;
     mutable bool argumentsCanEscape = false;
     bool requiresExecutionContext = false;
@@ -276,11 +275,6 @@ struct Context {
         }
     };
 
-    // Qml extension:
-    SmallSet<int> idObjectDependencies;
-    PropertyDependencyMap contextObjectPropertyDependencies;
-    PropertyDependencyMap scopeObjectPropertyDependencies;
-
     Context(Context *parent, ContextType type)
         : parent(parent)
         , contextType(type)
@@ -336,6 +330,7 @@ struct Context {
     struct ResolvedName {
         enum Type {
             Unresolved,
+            QmlGlobal,
             Global,
             Local,
             Stack,

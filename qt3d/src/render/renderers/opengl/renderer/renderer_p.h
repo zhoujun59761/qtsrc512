@@ -78,6 +78,7 @@
 #include <Qt3DRender/private/filtercompatibletechniquejob_p.h>
 #include <Qt3DRender/private/updateskinningpalettejob_p.h>
 #include <Qt3DRender/private/updateentitylayersjob_p.h>
+#include <Qt3DRender/private/updateentityhierarchyjob_p.h>
 #include <Qt3DRender/private/renderercache_p.h>
 #include <Qt3DRender/private/texture_p.h>
 
@@ -100,6 +101,7 @@ QT_BEGIN_NAMESPACE
 
 class QSurface;
 class QMouseEvent;
+class QScreen;
 
 namespace Qt3DCore {
 class QEntity;
@@ -287,6 +289,8 @@ public:
     ViewSubmissionResultData submitRenderViews(const QVector<Render::RenderView *> &renderViews);
 
     RendererCache *cache() { return &m_cache; }
+    void setScreen(QScreen *scr) override;
+    QScreen *screen() const override;
 
 #ifdef QT3D_RENDER_UNIT_TESTS
 public:
@@ -361,6 +365,7 @@ private:
     UpdateMeshTriangleListJobPtr m_updateMeshTriangleListJob;
     FilterCompatibleTechniqueJobPtr m_filterCompatibleTechniqueJob;
     UpdateEntityLayersJobPtr m_updateEntityLayersJob;
+    UpdateEntityHierarchyJobPtr m_updateEntityHierarchyJob;
 
     QVector<Qt3DCore::QNodeId> m_pendingRenderCaptureSendRequests;
 
@@ -406,6 +411,7 @@ private:
 
     QMetaObject::Connection m_contextConnection;
     RendererCache m_cache;
+    QScreen *m_screen = nullptr;
 };
 
 } // namespace Render

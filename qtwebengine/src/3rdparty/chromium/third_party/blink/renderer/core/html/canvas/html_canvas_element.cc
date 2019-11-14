@@ -152,8 +152,15 @@ HTMLCanvasElement::~HTMLCanvasElement() {
 }
 
 void HTMLCanvasElement::Dispose() {
-  if (PlaceholderFrame())
+  if (PlaceholderFrame()) {
     ReleasePlaceholderFrame();
+  }
+  // It's possible that the placeholder frame has been disposed but its ID still
+  // exists. Make sure that it gets unregistered here
+  UnregisterPlaceholder();
+
+  // We need to drop frame dispatcher, to prevent mojo calls from completing.
+  frame_dispatcher_ = nullptr;
 
   if (context_) {
     context_->DetachHost();

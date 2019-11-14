@@ -1350,7 +1350,7 @@ void VcprojGenerator::initWinDeployQtTool()
         //  structure manually by invoking windeployqt a second time, so that
         //  the MDILXapCompile call succeeds and deployment continues.
         conf.windeployqt.CommandLine += commandLine
-                + QStringLiteral(" -list relative -dir \"$(MSBuildProjectDirectory)\" \"$(OutDir)\\$(TargetName).exe\" > ")
+                + QStringLiteral(" -list relative -dir \"$(MSBuildProjectDirectory)\" \"$(OutDir)\\$(TargetFileName)\" > ")
                 + MakefileGenerator::shellQuote(conf.windeployqt.Record);
         conf.windeployqt.config = &vcProject.Configuration;
         conf.windeployqt.ExcludedFromBuild = false;
@@ -1447,6 +1447,7 @@ void VcprojGenerator::initTranslationFiles()
     vcProject.TranslationFiles.Guid = _GUIDTranslationFiles;
 
     vcProject.TranslationFiles.addFiles(project->values("TRANSLATIONS"));
+    vcProject.TranslationFiles.addFiles(project->values("EXTRA_TRANSLATIONS"));
 
     vcProject.TranslationFiles.Project = this;
     vcProject.TranslationFiles.Config = &(vcProject.Configuration);
@@ -1523,6 +1524,18 @@ void VcprojGenerator::initDistributionFiles()
     vcProject.DistributionFiles.Config = &(vcProject.Configuration);
 }
 
+QString VcprojGenerator::extraCompilerName(const ProString &extraCompiler,
+                                             const QStringList &inputs,
+                                             const QStringList &outputs)
+{
+    QString name = project->values(ProKey(extraCompiler + ".name")).join(' ');
+    if (name.isEmpty())
+        name = extraCompiler.toQString();
+    else
+        name = replaceExtraCompilerVariables(name, inputs, outputs, NoShell);
+    return name;
+}
+
 void VcprojGenerator::initExtraCompilerOutputs()
 {
     ProStringList otherFilters;
@@ -1540,13 +1553,16 @@ void VcprojGenerator::initExtraCompilerOutputs()
                  << "YACCSOURCES";
     const ProStringList &quc = project->values("QMAKE_EXTRA_COMPILERS");
     for (ProStringList::ConstIterator it = quc.begin(); it != quc.end(); ++it) {
-        ProString extracompilerName = project->first(ProKey(*it + ".name"));
-        if (extracompilerName.isEmpty())
-            extracompilerName = (*it);
+        const ProStringList &inputVars = project->values(ProKey(*it + ".input"));
+        ProStringList inputFiles;
+        for (auto var : inputVars)
+            inputFiles.append(project->values(var.toKey()));
+        const ProStringList &outputs = project->values(ProKey(*it + ".output"));
 
         // Create an extra compiler filter and add the files
         VCFilter extraCompile;
-        extraCompile.Name = extracompilerName.toQString();
+        extraCompile.Name = extraCompilerName(it->toQString(), inputFiles.toQStringList(),
+                                              outputs.toQStringList());
         extraCompile.ParseFiles = _False;
         extraCompile.Filter = "";
         extraCompile.Guid = QString(_GUIDExtraCompilerFiles) + "-" + (*it);
@@ -1559,17 +1575,19 @@ void VcprojGenerator::initExtraCompilerOutputs()
             if (!outputVar.isEmpty() && otherFilters.contains(outputVar))
                 continue;
 
-            QString tmp_out = project->first(ProKey(*it + ".output")).toQString();
+            QString tmp_out;
+            if (!outputs.isEmpty())
+                tmp_out = project->first(outputs.first().toKey()).toQString();
             if (project->values(ProKey(*it + ".CONFIG")).indexOf("combine") != -1) {
                 // Combined output, only one file result
                 extraCompile.addFile(Option::fixPathToTargetOS(
                         replaceExtraCompilerVariables(tmp_out, QString(), QString(), NoShell), false));
-            } else {
+            } else if (!inputVars.isEmpty()) {
                 // One output file per input
-                const ProStringList &tmp_in = project->values(project->first(ProKey(*it + ".input")).toKey());
+                const ProStringList &tmp_in = project->values(inputVars.first().toKey());
                 for (int i = 0; i < tmp_in.count(); ++i) {
                     const QString &filename = tmp_in.at(i).toQString();
-                    if (extraCompilerSources.contains(filename))
+                    if (extraCompilerSources.contains(filename) && !otherFiltersContain(filename))
                         extraCompile.addFile(Option::fixPathToTargetOS(
                                 replaceExtraCompilerVariables(filename, tmp_out, QString(), NoShell), false));
                 }
@@ -1579,13 +1597,12 @@ void VcprojGenerator::initExtraCompilerOutputs()
             // build steps there. So, we turn it around and add it to the input files instead,
             // provided that the input file variable is not handled already (those in otherFilters
             // are handled, so we avoid them).
-            const ProStringList &inputVars = project->values(ProKey(*it + ".input"));
             for (const ProString &inputVar : inputVars) {
                 if (!otherFilters.contains(inputVar)) {
                     const ProStringList &tmp_in = project->values(inputVar.toKey());
                     for (int i = 0; i < tmp_in.count(); ++i) {
                         const QString &filename = tmp_in.at(i).toQString();
-                        if (extraCompilerSources.contains(filename))
+                        if (extraCompilerSources.contains(filename) && !otherFiltersContain(filename))
                             extraCompile.addFile(Option::fixPathToTargetOS(
                                     replaceExtraCompilerVariables(filename, QString(), QString(), NoShell), false));
                     }
@@ -1597,6 +1614,28 @@ void VcprojGenerator::initExtraCompilerOutputs()
 
         vcProject.ExtraCompilersFiles.append(extraCompile);
     }
+}
+
+bool VcprojGenerator::otherFiltersContain(const QString &fileName) const
+{
+    auto filterFileMatches = [&fileName] (const VCFilterFile &ff)
+    {
+        return ff.file == fileName;
+    };
+    for (const VCFilter *filter : { &vcProject.RootFiles,
+                                    &vcProject.SourceFiles,
+                                    &vcProject.HeaderFiles,
+                                    &vcProject.GeneratedFiles,
+                                    &vcProject.LexYaccFiles,
+                                    &vcProject.TranslationFiles,
+                                    &vcProject.FormFiles,
+                                    &vcProject.ResourceFiles,
+                                    &vcProject.DeploymentFiles,
+                                    &vcProject.DistributionFiles}) {
+        if (std::any_of(filter->Files.cbegin(), filter->Files.cend(), filterFileMatches))
+            return true;
+    }
+    return false;
 }
 
 // ------------------------------------------------------------------------------------------------

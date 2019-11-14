@@ -33,6 +33,8 @@
 #include <QJSValueIterator>
 #include <private/qquickvaluetypes_p.h>
 #include <private/qqmlglobal_p.h>
+#include <private/qv4engine_p.h>
+#include <private/qv4variantobject_p.h>
 #include "../../shared/util.h"
 #include "testtypes.h"
 
@@ -93,6 +95,8 @@ private slots:
     void toStringConversion();
     void enumerableProperties();
     void enumProperties();
+    void scarceTypes();
+    void nonValueTypes();
 
 private:
     QQmlEngine engine;
@@ -1766,6 +1770,36 @@ void tst_qqmlvaluetypes::enumProperties()
     QCOMPARE(enumValue.toInt(), int(g.enumProperty()));
 }
 
+void tst_qqmlvaluetypes::scarceTypes()
+{
+    // These should not be treated as value types because we want the scarce resource
+    // mechanism to clear them when going out of scope. The scarce resource mechanism
+    // only works on QV4::VariantObject as that has an additional level of redirection.
+    QVERIFY(!QQmlValueTypeFactory::isValueType(qMetaTypeId<QImage>()));
+    QVERIFY(!QQmlValueTypeFactory::isValueType(qMetaTypeId<QPixmap>()));
+
+    QV4::ExecutionEngine engine;
+    QV4::Scope scope(&engine);
+
+    QImage img(20, 20, QImage::Format_ARGB32);
+    QV4::ScopedObject imgValue(scope, engine.fromVariant(QVariant::fromValue(img)));
+    QCOMPARE(QByteArray(imgValue->vtable()->className), QByteArray("VariantObject"));
+
+    QPixmap pixmap;
+    QV4::ScopedObject pixmapValue(scope, engine.fromVariant(QVariant::fromValue(img)));
+    QCOMPARE(QByteArray(pixmapValue->vtable()->className), QByteArray("VariantObject"));
+}
+
+#define CHECK_TYPE_IS_NOT_VALUETYPE(Type, typeId, cppType) \
+    QVERIFY(!QQmlValueTypeFactory::isValueType(QMetaType::Type));
+
+void tst_qqmlvaluetypes::nonValueTypes()
+{
+    CHECK_TYPE_IS_NOT_VALUETYPE(UnknownType, 0, void)
+    QT_FOR_EACH_STATIC_PRIMITIVE_TYPE(CHECK_TYPE_IS_NOT_VALUETYPE);
+}
+
+#undef CHECK_TYPE_IS_NOT_VALUETYPE
 
 QTEST_MAIN(tst_qqmlvaluetypes)
 

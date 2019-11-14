@@ -37,6 +37,7 @@
 #include <QtQml/qqmlincubator.h>
 #include <QtQuick/private/qquickitemview_p_p.h>
 #include <QtQuick/private/qquicklistview_p.h>
+#include <QtQuick/private/qquickmousearea_p.h>
 #include <QtQuick/private/qquicktext_p.h>
 #include <QtQml/private/qqmlobjectmodel_p.h>
 #include <QtQml/private/qqmllistmodel_p.h>
@@ -151,6 +152,7 @@ private slots:
     void headerChangesViewport();
     void footer();
     void footer_data();
+    void footer2();
     void extents();
     void extents_data();
     void resetModel_headerFooter();
@@ -273,6 +275,8 @@ private slots:
 
     void addOnCompleted();
     void setPositionOnLayout();
+    void touchCancel();
+    void resizeAfterComponentComplete();
 
 private:
     template <class T> void items(const QUrl &source);
@@ -328,6 +332,7 @@ private:
 
     QQuickView *m_view;
     QString testForView;
+    QTouchDevice *touchDevice = QTest::createTouchDevice();
 };
 
 class TestObject : public QObject
@@ -1936,6 +1941,31 @@ void tst_QQuickListView::enforceRange()
     listview->setContentY(20);
 
     QTRY_COMPARE(listview->currentIndex(), 6);
+
+    // Test for [QTBUG-77418] {
+        // explicit set current index
+        listview->setCurrentIndex(5);
+        QTRY_COMPARE(listview->contentY(), 0);
+
+        // then check if contentY changes if the highlight range is changed
+        listview->setPreferredHighlightBegin(80);
+        listview->setPreferredHighlightEnd(80);
+        QTRY_COMPARE(listview->contentY(), 20);
+
+        // verify that current index does not change with no highlight
+        listview->setHighlightRangeMode(QQuickListView::NoHighlightRange);
+        listview->setContentY(100);
+        QTRY_COMPARE(listview->currentIndex(), 5);
+
+        // explicit set current index, contentY should not change now
+        listview->setCurrentIndex(6);
+        QTRY_COMPARE(listview->contentY(), 100);
+        QTest::qWait(50);   // This was needed in order to reproduce a failure for the following test
+
+        // verify that contentY changes if we turn on highlight again
+        listview->setHighlightRangeMode(QQuickListView::StrictlyEnforceRange);
+        QTRY_COMPARE(listview->contentY(), 40);
+    // } Test for [QTBUG-77418]
 
     // change model
     QaimModel model2;
@@ -4133,6 +4163,21 @@ void tst_QQuickListView::footer_data()
         << QPointF(0, -320)
         << QPointF(0, -20)
         << QPointF(0, -(30 * 20) - 10);
+}
+
+void tst_QQuickListView::footer2() // QTBUG-31677
+{
+    QQuickView *window = getView();
+    window->setSource(testFileUrl("footer2.qml"));
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+
+    QQuickListView *listview = findItem<QQuickListView>(window->rootObject(), "list");
+    QTRY_VERIFY(listview != nullptr);
+
+    QQuickItem *footer = listview->footerItem();
+    QVERIFY(footer != nullptr);
+    QTRY_COMPARE(footer->y(), 0.0);
 }
 
 class LVAccessor : public QQuickListView
@@ -8943,6 +8988,52 @@ void tst_QQuickListView::useDelegateChooserWithoutDefault()
     window->setSource(testFileUrl("usechooserwithoutdefault.qml"));
     window->show();
 };
+
+void tst_QQuickListView::touchCancel() // QTBUG-74679
+{
+    QScopedPointer<QQuickView> window(createView());
+    window->setSource(testFileUrl("delegateWithMouseArea.qml"));
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
+
+    QQuickListView *listview = qobject_cast<QQuickListView *>(window->rootObject());
+    QVERIFY(listview);
+    QQuickMouseArea *mouseArea = listview->currentItem()->findChild<QQuickMouseArea *>();
+    QVERIFY(mouseArea);
+
+    QPoint p1(300, 300);
+    QTest::touchEvent(window.data(), touchDevice).press(0, p1, window.data());
+    QQuickTouchUtils::flush(window.data());
+    QTRY_VERIFY(mouseArea->pressed());
+    // and because Flickable filtered it, QQuickFlickablePrivate::pressed
+    // should be true, but it's not easily tested here
+
+    QTouchEvent cancelEvent(QEvent::TouchCancel);
+    cancelEvent.setDevice(touchDevice);
+    QCoreApplication::sendEvent(window.data(), &cancelEvent);
+    // now QQuickWindowPrivate::sendUngrabEvent() will be called, Flickable will filter it,
+    // QQuickFlickablePrivate::pressed will be set to false, and that will allow setCurrentIndex() to make it move
+    QQuickTouchUtils::flush(window.data());
+
+    listview->setCurrentIndex(1);
+    // ensure that it actually moves (animates) to the second delegate
+    QTRY_COMPARE(listview->contentY(), 500.0);
+}
+
+void tst_QQuickListView::resizeAfterComponentComplete()  // QTBUG-76487
+{
+    QScopedPointer<QQuickView> window(createView());
+    window->setSource(testFileUrl("resizeAfterComponentComplete.qml"));
+    window->resize(640, 480);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
+
+    QObject *listView = window->rootObject();
+    QVERIFY(listView);
+
+    QObject *lastItem = qvariant_cast<QObject *>(listView->property("lastItem"));
+    QTRY_COMPARE(lastItem->property("y").toInt(), 9 * lastItem->property("height").toInt());
+}
 
 QTEST_MAIN(tst_QQuickListView)
 

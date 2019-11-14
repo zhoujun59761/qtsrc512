@@ -1105,6 +1105,20 @@ ByteString GetRectFillAppStream(const CFX_FloatRect& rect,
   return ByteString(sAppStream);
 }
 
+void SetDefaultIconName(CPDF_Stream* pIcon, const char* name) {
+  if (!pIcon)
+    return;
+
+  CPDF_Dictionary* pImageDict = pIcon->GetDict();
+  if (!pImageDict)
+    return;
+
+  if (pImageDict->KeyExist("Name"))
+    return;
+
+  pImageDict->SetNewFor<CPDF_String>("Name", name, false);
+}
+
 }  // namespace
 
 CPWL_AppStream::CPWL_AppStream(CPDFSDK_Widget* widget, CPDF_Dictionary* dict)
@@ -1218,29 +1232,11 @@ void CPWL_AppStream::SetAsPushButton() {
   if (pControl->HasMKEntry("IX"))
     pDownIcon = pControl->GetDownIcon();
 
-  if (pNormalIcon) {
-    if (CPDF_Dictionary* pImageDict = pNormalIcon->GetDict()) {
-      if (pImageDict->GetStringFor("Name").IsEmpty())
-        pImageDict->SetNewFor<CPDF_String>("Name", "ImgA", false);
-    }
-  }
-
-  if (pRolloverIcon) {
-    if (CPDF_Dictionary* pImageDict = pRolloverIcon->GetDict()) {
-      if (pImageDict->GetStringFor("Name").IsEmpty())
-        pImageDict->SetNewFor<CPDF_String>("Name", "ImgB", false);
-    }
-  }
-
-  if (pDownIcon) {
-    if (CPDF_Dictionary* pImageDict = pDownIcon->GetDict()) {
-      if (pImageDict->GetStringFor("Name").IsEmpty())
-        pImageDict->SetNewFor<CPDF_String>("Name", "ImgC", false);
-    }
-  }
+  SetDefaultIconName(pNormalIcon, "ImgA");
+  SetDefaultIconName(pRolloverIcon, "ImgB");
+  SetDefaultIconName(pDownIcon, "ImgC");
 
   CPDF_IconFit iconFit = pControl->GetIconFit();
-
   CBA_FontMap font_map(
       widget_.Get(),
       widget_->GetInterForm()->GetFormFillEnv()->GetSysHandler());
@@ -1953,7 +1949,8 @@ void CPWL_AppStream::Write(const ByteString& sAPType,
 }
 
 void CPWL_AppStream::Remove(const ByteString& sAPType) {
-  dict_->RemoveFor(sAPType);
+  CPDF_Document* doc = widget_->GetPageView()->GetPDFDocument();
+  doc->AddOrphan(dict_->RemoveFor(sAPType));
 }
 
 ByteString CPWL_AppStream::GetBackgroundAppStream() const {

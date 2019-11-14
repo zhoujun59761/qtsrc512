@@ -64,6 +64,7 @@ QT_BEGIN_NAMESPACE
 
 class QSurface;
 class QSize;
+class QScreen;
 
 namespace Qt3DCore {
 class QAbstractFrameAdvanceService;
@@ -114,6 +115,8 @@ public:
         JointDirty          = 1 << 11,
         LayersDirty         = 1 << 12,
         TechniquesDirty     = 1 << 13,
+        EntityHierarchyDirty= 1 << 14,
+        LightsDirty         = 1 << 15,
         AllDirty            = 0xffffff
     };
     Q_DECLARE_FLAGS(BackendNodeDirtySet, BackendNodeDirtyFlag)
@@ -174,6 +177,8 @@ public:
 
     // For QtQuick rendering
     virtual void setOpenGLContext(QOpenGLContext *ctx) = 0;
+    virtual void setScreen(QScreen *) {}
+    virtual QScreen *screen() const { return nullptr; }
 
     virtual void setOffscreenSurfaceHelper(OffscreenSurfaceHelper *helper) = 0;
     virtual QSurfaceFormat format() = 0;

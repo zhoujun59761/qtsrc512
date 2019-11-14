@@ -173,6 +173,19 @@ static const int SUBMENU_DELAY = 225;
     \sa {Customizing Menu}, MenuItem, {Menu Controls}, {Popup Controls}
 */
 
+/*!
+    \qmlproperty bool QtQuick.Controls::Menu::focus
+
+    This property holds whether the popup wants focus.
+
+    When the popup actually receives focus, \l activeFocus will be \c true.
+    For more information, see \l {Keyboard Focus in Qt Quick}.
+
+    The default value is \c false.
+
+    \sa activeFocus
+*/
+
 static const QQuickPopup::ClosePolicy cascadingSubMenuClosePolicy = QQuickPopup::CloseOnEscape | QQuickPopup::CloseOnPressOutsideParent;
 
 static bool shouldCascade()
@@ -213,6 +226,7 @@ void QQuickMenuPrivate::insertItem(int index, QQuickItem *item)
     if (complete)
         resizeItem(item);
     QQuickItemPrivate::get(item)->addItemChangeListener(this, QQuickItemPrivate::Destroyed | QQuickItemPrivate::Parent);
+    QQuickItemPrivate::get(item)->updateOrAddGeometryChangeListener(this, QQuickGeometryChange::Width);
     contentModel->insert(index, item);
 
     QQuickMenuItem *menuItem = qobject_cast<QQuickMenuItem *>(item);
@@ -237,6 +251,7 @@ void QQuickMenuPrivate::removeItem(int index, QQuickItem *item)
     contentData.removeOne(item);
 
     QQuickItemPrivate::get(item)->removeItemChangeListener(this, QQuickItemPrivate::Destroyed | QQuickItemPrivate::Parent);
+    QQuickItemPrivate::get(item)->removeItemChangeListener(this, QQuickItemPrivate::Geometry);
     item->setParentItem(nullptr);
     contentModel->remove(index);
 
@@ -358,10 +373,20 @@ void QQuickMenuPrivate::itemDestroyed(QQuickItem *item)
         removeItem(index, item);
 }
 
-void QQuickMenuPrivate::itemGeometryChanged(QQuickItem *, QQuickGeometryChange, const QRectF &)
+void QQuickMenuPrivate::itemGeometryChanged(QQuickItem *item, QQuickGeometryChange, const QRectF &)
 {
-    if (complete)
+    if (!complete)
+        return;
+
+    if (item == contentItem) {
+        // The contentItem's geometry changed, so resize any items
+        // that don't have explicit widths set so that they fill the width of the menu.
         resizeItems();
+    } else {
+        // The geometry of an item in the menu changed. If the item
+        // doesn't have an explicit width set, make it fill the width of the menu.
+        resizeItem(item);
+    }
 }
 
 QQuickPopupPositioner *QQuickMenuPrivate::getPositioner()
@@ -1382,10 +1407,14 @@ void QQuickMenu::contentItemChange(QQuickItem *newItem, QQuickItem *oldItem)
     Q_D(QQuickMenu);
     QQuickPopup::contentItemChange(newItem, oldItem);
 
-    if (oldItem)
+    if (oldItem) {
         QQuickItemPrivate::get(oldItem)->removeItemChangeListener(d, QQuickItemPrivate::Children);
-    if (newItem)
+        QQuickItemPrivate::get(oldItem)->removeItemChangeListener(d, QQuickItemPrivate::Geometry);
+    }
+    if (newItem) {
         QQuickItemPrivate::get(newItem)->addItemChangeListener(d, QQuickItemPrivate::Children);
+        QQuickItemPrivate::get(newItem)->updateOrAddGeometryChangeListener(d, QQuickGeometryChange::Width);
+    }
 
     d->contentItem = newItem;
 }

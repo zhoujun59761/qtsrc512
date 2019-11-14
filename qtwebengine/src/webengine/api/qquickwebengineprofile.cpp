@@ -163,11 +163,6 @@ QQuickWebEngineProfilePrivate::QQuickWebEngineProfilePrivate(ProfileAdapter *pro
 
 QQuickWebEngineProfilePrivate::~QQuickWebEngineProfilePrivate()
 {
-
-    while (!m_webContentsAdapterClients.isEmpty()) {
-       m_webContentsAdapterClients.first()->destroy();
-    }
-
     if (m_profileAdapter) {
         // In the case the user sets this profile as the parent of the interceptor
         // it can be deleted before the browser-context still referencing it is.
@@ -179,14 +174,16 @@ QQuickWebEngineProfilePrivate::~QQuickWebEngineProfilePrivate()
         delete m_profileAdapter;
 }
 
-void QQuickWebEngineProfilePrivate::addWebContentsAdapterClient(QQuickWebEngineViewPrivate *adapter)
+void QQuickWebEngineProfilePrivate::addWebContentsAdapterClient(QtWebEngineCore::WebContentsAdapterClient *adapter)
 {
-    m_webContentsAdapterClients.append(adapter);
+    Q_ASSERT(m_profileAdapter);
+    m_profileAdapter->addWebContentsAdapterClient(adapter);
 }
 
-void QQuickWebEngineProfilePrivate::removeWebContentsAdapterClient(QQuickWebEngineViewPrivate*adapter)
+void QQuickWebEngineProfilePrivate::removeWebContentsAdapterClient(QtWebEngineCore::WebContentsAdapterClient*adapter)
 {
-    m_webContentsAdapterClients.removeAll(adapter);
+    Q_ASSERT(m_profileAdapter);
+    m_profileAdapter->removeWebContentsAdapterClient(adapter);
 }
 
 QtWebEngineCore::ProfileAdapter *QQuickWebEngineProfilePrivate::profileAdapter() const
@@ -850,20 +847,7 @@ void QQuickWebEngineProfile::setRequestInterceptor(QWebEngineUrlRequestIntercept
 const QWebEngineUrlSchemeHandler *QQuickWebEngineProfile::urlSchemeHandler(const QByteArray &scheme) const
 {
     const Q_D(QQuickWebEngineProfile);
-    if (d->profileAdapter()->customUrlSchemeHandlers().contains(scheme))
-        return d->profileAdapter()->customUrlSchemeHandlers().value(scheme);
-    return 0;
-}
-
-static bool checkInternalScheme(const QByteArray &scheme)
-{
-    static QSet<QByteArray> internalSchemes;
-    if (internalSchemes.isEmpty()) {
-        internalSchemes << QByteArrayLiteral("qrc") << QByteArrayLiteral("data") << QByteArrayLiteral("blob")
-                        << QByteArrayLiteral("http") << QByteArrayLiteral("https") << QByteArrayLiteral("ftp")
-                        << QByteArrayLiteral("javascript");
-    }
-    return internalSchemes.contains(scheme);
+    return d->profileAdapter()->customUrlSchemeHandlers().value(scheme.toLower());
 }
 
 /*!
@@ -876,23 +860,8 @@ void QQuickWebEngineProfile::installUrlSchemeHandler(const QByteArray &scheme, Q
 {
     Q_D(QQuickWebEngineProfile);
     Q_ASSERT(handler);
-    QByteArray canonicalScheme = scheme.toLower();
-    if (checkInternalScheme(canonicalScheme)) {
-        qWarning("Cannot install a URL scheme handler overriding internal scheme: %s", scheme.constData());
+    if (!d->profileAdapter()->addCustomUrlSchemeHandler(scheme, handler))
         return;
-    }
-
-    if (d->profileAdapter()->customUrlSchemeHandlers().contains(canonicalScheme)) {
-        if (d->profileAdapter()->customUrlSchemeHandlers().value(canonicalScheme) != handler)
-            qWarning("URL scheme handler already installed for the scheme: %s", scheme.constData());
-        return;
-    }
-
-    if (QWebEngineUrlScheme::schemeByName(canonicalScheme) == QWebEngineUrlScheme())
-        qWarning("Please register the custom scheme '%s' via QWebEngineUrlScheme::registerScheme() "
-                 "before installing the custom scheme handler.", scheme.constData());
-
-    d->profileAdapter()->addCustomUrlSchemeHandler(canonicalScheme, handler);
     connect(handler, SIGNAL(_q_destroyedUrlSchemeHandler(QWebEngineUrlSchemeHandler*)), this, SLOT(destroyedUrlSchemeHandler(QWebEngineUrlSchemeHandler*)));
 }
 
@@ -958,7 +927,7 @@ QQuickWebEngineSettings *QQuickWebEngineProfile::settings() const
     \property QQuickWebEngineProfile::userScripts
     \since 5.9
 
-    \brief the collection of scripts that are injected into all pages that share
+    \brief The collection of scripts that are injected into all pages that share
     this profile.
 
     \sa QQuickWebEngineScript, QQmlListReference

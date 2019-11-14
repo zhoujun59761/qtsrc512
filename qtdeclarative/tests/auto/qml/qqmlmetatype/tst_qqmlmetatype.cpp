@@ -66,6 +66,10 @@ private slots:
 
     void normalizeUrls();
     void unregisterAttachedProperties();
+    void revisionedGroupedProperties();
+
+    void enumsInRecursiveImport_data();
+    void enumsInRecursiveImport();
 };
 
 class TestType : public QObject
@@ -546,8 +550,8 @@ void tst_qqmlmetatype::unregisterAttachedProperties()
         c.setData("import QtQuick 2.2\n Item { }", dummy);
 
         const QQmlType attachedType = QQmlMetaType::qmlType("QtQuick/KeyNavigation", 2, 2);
-        QCOMPARE(attachedType.attachedPropertiesId(QQmlEnginePrivate::get(&e)),
-                 attachedType.index());
+        QCOMPARE(attachedType.attachedPropertiesType(QQmlEnginePrivate::get(&e)),
+                 attachedType.metaObject());
 
         QVERIFY(c.create());
     }
@@ -565,11 +569,96 @@ void tst_qqmlmetatype::unregisterAttachedProperties()
                   "Item { KeyNavigation.up: null }", dummy);
 
         const QQmlType attachedType = QQmlMetaType::qmlType("QtQuick/KeyNavigation", 2, 2);
-        QCOMPARE(attachedType.attachedPropertiesId(QQmlEnginePrivate::get(&e)),
-                 attachedType.index());
+        QCOMPARE(attachedType.attachedPropertiesType(QQmlEnginePrivate::get(&e)),
+                 attachedType.metaObject());
 
         QVERIFY(c.create());
     }
+}
+
+class Grouped : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int prop READ prop WRITE setProp NOTIFY propChanged REVISION 1)
+public:
+    int prop() const { return m_prop; }
+    void setProp(int prop)
+    {
+        if (prop != m_prop) {
+            m_prop = prop;
+            emit propChanged(prop);
+        }
+    }
+
+signals:
+    Q_REVISION(1) void propChanged(int prop);
+
+private:
+    int m_prop = 0;
+};
+
+class MyItem : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(Grouped *grouped READ grouped CONSTANT)
+public:
+    MyItem() : m_grouped(new Grouped) {}
+    Grouped *grouped() const { return m_grouped.data(); }
+
+private:
+    QScopedPointer<Grouped> m_grouped;
+};
+
+void tst_qqmlmetatype::revisionedGroupedProperties()
+{
+    qmlClearTypeRegistrations();
+    qmlRegisterType<MyItem>("GroupedTest", 1, 0, "MyItem");
+    qmlRegisterType<MyItem, 1>("GroupedTest", 1, 1, "MyItem");
+    qmlRegisterUncreatableType<Grouped>("GroupedTest", 1, 0, "Grouped", "Grouped");
+    qmlRegisterUncreatableType<Grouped, 1>("GroupedTest", 1, 1, "Grouped", "Grouped");
+
+    {
+        QQmlEngine engine;
+        QQmlComponent valid(&engine, testFileUrl("revisionedGroupedPropertiesValid.qml"));
+        QVERIFY(valid.isReady());
+        QScopedPointer<QObject> obj(valid.create());
+        QVERIFY(!obj.isNull());
+    }
+
+    {
+        QQmlEngine engine;
+        QQmlComponent invalid(&engine, testFileUrl("revisionedGroupedPropertiesInvalid.qml"));
+        QVERIFY(invalid.isError());
+    }
+}
+
+void tst_qqmlmetatype::enumsInRecursiveImport_data()
+{
+    QTest::addColumn<QString>("importPath");
+    QTest::addColumn<QUrl>("componentUrl");
+
+    QTest::addRow("data directory") << dataDirectory()
+                                    << testFileUrl("enumsInRecursiveImport.qml");
+
+    // The qrc case behaves differently because we failed to detect the recursion in type loading
+    // due to varying numbers of slashes after the "qrc:" in the URLs.
+    QTest::addRow("resources") << QStringLiteral("qrc:/data")
+                               << QUrl("qrc:/data/enumsInRecursiveImport.qml");
+}
+
+void tst_qqmlmetatype::enumsInRecursiveImport()
+{
+    QFETCH(QString, importPath);
+    QFETCH(QUrl, componentUrl);
+
+    qmlClearTypeRegistrations();
+    QQmlEngine engine;
+    engine.addImportPath(importPath);
+    QQmlComponent c(&engine, componentUrl);
+    QVERIFY(c.isReady());
+    QScopedPointer<QObject> obj(c.create());
+    QVERIFY(!obj.isNull());
+    QTRY_COMPARE(obj->property("color").toString(), QString("green"));
 }
 
 QTEST_MAIN(tst_qqmlmetatype)

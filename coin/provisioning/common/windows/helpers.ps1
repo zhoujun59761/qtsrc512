@@ -22,13 +22,45 @@ function Run-Executable
         [string]$Executable=$(throw("You must specify a program to run.")),
         [string[]]$Arguments
     )
+
+    $stdoutFile = [System.IO.Path]::GetTempFileName()
+    $stderrFile = [System.IO.Path]::GetTempFileName()
+
     if ([string]::IsNullOrEmpty($Arguments)) {
         Write-Host "Running `"$Executable`""
-        $p = Start-Process -FilePath "$Executable" -Wait -PassThru
+        $p = Start-Process -FilePath "$Executable" -Wait -PassThru `
+            -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
     } else {
         Write-Host "Running `"$Executable`" with arguments `"$Arguments`""
-        $p = Start-Process -FilePath "$Executable" -ArgumentList $Arguments -PassThru
+        $p = Start-Process -FilePath "$Executable" -ArgumentList $Arguments -PassThru `
+            -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
         Wait-Process -InputObject $p
+    }
+
+    $stdoutContent = [System.IO.File]::ReadAllText($stdoutFile)
+    $stderrContent = [System.IO.File]::ReadAllText($stderrFile)
+    Remove-Item -Path $stdoutFile, $stderrFile -Force -ErrorAction Ignore
+
+    $hasOutput = $false
+    if ([string]::IsNullOrEmpty($stdoutContent) -eq $false -or [string]::IsNullOrEmpty($stderrContent) -eq $false) {
+        $hasOutput = $true
+        Write-Host
+        Write-Host "======================================================================"
+    }
+    if ([string]::IsNullOrEmpty($stdoutContent) -eq $false) {
+        Write-Host "stdout of `"$Executable`":"
+        Write-Host "======================================================================"
+        Write-Host $stdoutContent
+        Write-Host "======================================================================"
+    }
+    if ([string]::IsNullOrEmpty($stderrContent) -eq $false) {
+        Write-Host "stderr of `"$Executable`":"
+        Write-Host "======================================================================"
+        Write-Host $stderrContent
+        Write-Host "======================================================================"
+    }
+    if ($hasOutput) {
+        Write-Host
     }
     if ($p.ExitCode -ne 0) {
         throw "Process $($Executable) exited with exit code $($p.ExitCode)"
@@ -136,6 +168,18 @@ function Add-Path
     $Env:PATH = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
 }
 
+function Prepend-Path
+{
+    Param (
+        [string]$Path
+    )
+    Write-Host "Adding $Path to Path"
+
+    $oldPath = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
+    [Environment]::SetEnvironmentVariable("Path", "$Path;" + $oldPath, [EnvironmentVariableTarget]::Machine)
+    $Env:PATH = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
+}
+
 function Set-EnvironmentVariable
 {
     Param (
@@ -158,4 +202,43 @@ function IsProxyEnabled {
 
 function Get-Proxy {
     return (Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings').proxyServer
+}
+
+function Remove {
+
+    Param (
+        [string]$Path = $(BadParam("a path"))
+    )
+    Write-Host "Removing $Path"
+    $i = 0
+    While ( Test-Path($Path) ){
+        Try{
+            remove-item -Force -Recurse -Path $Path -ErrorAction Stop
+        }catch{
+            $i +=1
+            if ($i -eq 5) {exit 1}
+            Write-Verbose "$Path locked, trying again in 5"
+            Start-Sleep -seconds 5
+        }
+    }
+}
+
+function DisableSchedulerTask {
+
+    Param (
+        [string]$Task = $(BadParam("a task"))
+    )
+
+    Write-Host "Disabling $Task from Task Scheduler"
+    SCHTASKS /Change /TN "Microsoft\Windows\$Task" /DISABLE
+}
+
+function DeleteSchedulerTask {
+
+   Param (
+        [string]$Task = $(BadParam("a task"))
+    )
+
+    Write-Host "Disabling $Task from Task Scheduler"
+    SCHTASKS /DELETE /TN "Microsoft\Windows\$Task" /F
 }

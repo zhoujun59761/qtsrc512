@@ -199,6 +199,21 @@ bool qWaitForSignal(QObject *obj, const char* signal, int timeout = 5000)
     return spy.size();
 }
 
+void maybeInvokeSetupMethod(QObject *setupObject, const char *member, QGenericArgument val0 = QGenericArgument(nullptr))
+{
+    // It's OK if it doesn't exist: since we have more than one callback that
+    // can be called, it makes sense if the user only implements one of them.
+    // We do this the long way rather than just calling the static
+    // QMetaObject::invokeMethod(), because that will issue a warning if the
+    // function doesn't exist, which we don't want.
+    const QMetaObject *setupMetaObject = setupObject->metaObject();
+    const int methodIndex = setupMetaObject->indexOfMethod(member);
+    if (methodIndex != -1) {
+        const QMetaMethod method = setupMetaObject->method(methodIndex);
+        method.invoke(setupObject, val0);
+    }
+}
+
 using namespace QV4::CompiledData;
 
 class TestCaseCollector
@@ -360,10 +375,8 @@ int quick_test_main_with_setup(int argc, char **argv, const char *name, const ch
         }
     }
 
-    if (setup) {
-        // Don't check the return value; it's OK if it doesn't exist.
-        QMetaObject::invokeMethod(setup, "applicationAvailable");
-    }
+    if (setup)
+        maybeInvokeSetupMethod(setup, "applicationAvailable()");
 
     // Look for QML-specific command-line options.
     //      -import dir         Specify an import directory.
@@ -503,6 +516,13 @@ int quick_test_main_with_setup(int argc, char **argv, const char *name, const ch
             qmlFileSelector->setExtraSelectors(fileSelectors);
         }
 
+        // Do this down here so that import paths, plugin paths, file selectors, etc. are available
+        // in case the user needs access to them. Do it _before_ the TestCaseCollector parses the
+        // QML files though, because it attempts to import modules, which might not be available
+        // if qmlRegisterType()/QQmlEngine::addImportPath() are called in qmlEngineAvailable().
+        if (setup)
+            maybeInvokeSetupMethod(setup, "qmlEngineAvailable(QQmlEngine*)", Q_ARG(QQmlEngine*, &engine));
+
         TestCaseCollector testCaseCollector(fi, &engine);
         if (!testCaseCollector.errors().isEmpty()) {
             for (const QQmlError &error : testCaseCollector.errors())
@@ -533,14 +553,6 @@ int quick_test_main_with_setup(int argc, char **argv, const char *name, const ch
                          &eventLoop, SLOT(quit()));
         view.rootContext()->setContextProperty
             (QLatin1String("qtest"), QTestRootObject::instance()); // Deprecated. Use QTestRootObject from Qt.test.qtestroot instead
-
-        // Do this down here so that import paths, plugin paths,
-        // file selectors, etc. are available in case the user needs access to them.
-        if (setup) {
-            // Don't check the return value; it's OK if it doesn't exist.
-            // If we add more callbacks in the future, it makes sense if the user only implements one of them.
-            QMetaObject::invokeMethod(setup, "qmlEngineAvailable", Q_ARG(QQmlEngine*, view.engine()));
-        }
 
         view.setObjectName(fi.baseName());
         view.setTitle(view.objectName());
@@ -592,10 +604,8 @@ int quick_test_main_with_setup(int argc, char **argv, const char *name, const ch
         }
     }
 
-    if (setup) {
-        // Don't check the return value; it's OK if it doesn't exist.
-        QMetaObject::invokeMethod(setup, "cleanupTestCase");
-    }
+    if (setup)
+        maybeInvokeSetupMethod(setup, "cleanupTestCase()");
 
     // Flush the current logging stream.
     QuickTestResult::setProgramName(nullptr);

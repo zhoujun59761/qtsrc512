@@ -5,11 +5,13 @@
         "gui-private",
         "printsupport"
     ],
+    "condition": "module.gui",
     "testDir": "../../config.tests",
     "commandline": {
         "options": {
             "webengine-alsa": "boolean",
             "webengine-embedded-build": "boolean",
+            "webengine-full-debug-info": "boolean",
             "webengine-icu": { "type": "enum", "name": "webengine-system-icu", "values": { "system": "yes", "qt": "no" } },
             "webengine-ffmpeg": { "type": "enum", "name": "webengine-system-ffmpeg", "values": { "system": "yes", "qt": "no" } },
             "webengine-opus": { "type": "enum", "name": "webengine-system-opus", "values": { "system": "yes", "qt": "no" } },
@@ -326,6 +328,11 @@
         "webengine-arm-thumb" : {
             "label": "thumb instruction set",
             "type": "hasThumbFlag"
+        },
+        "webengine-noexecstack" : {
+            "label": "linker supports -z noexecstack",
+            "type": "linkerSupportsFlag",
+            "flag": "-z,noexecstack"
         }
     },
 
@@ -636,6 +643,17 @@
             "condition": "config.unix && libs.webengine-x11",
             "output": [ "privateFeature" ]
         },
+        "webengine-ozone-x11" : {
+             "label": "Support qpa-xcb",
+             "condition": "config.unix
+                          && features.webengine-system-x11
+                          && features.webengine-system-libdrm
+                          && features.webengine-system-xcomposite
+                          && features.webengine-system-xcursor
+                          && features.webengine-system-xi
+                          && features.webengine-system-xtst",
+             "output": [ "privateFeature" ]
+        },
         "webengine-sanitizer" : {
             "label": "Sanitizer",
             "autoDetect": "config.sanitizer && tests.webengine-sanitizer",
@@ -656,6 +674,21 @@
         "webengine-arm-thumb": {
             "label": "Thumb instruction set",
             "condition": "config.linux && features.webengine-embedded-build && arch.arm && tests.webengine-arm-thumb",
+            "output": [ "privateFeature" ]
+        },
+        "webengine-full-debug-info": {
+            "label": "Full debug information",
+            "purpose": "Enables debug information for Blink and V8.",
+            "autoDetect": false,
+            "condition": "config.debug || features.debug_and_release || features.force_debug_info",
+            "output": [
+              { "type": "privateConfig", "name": "v8base_debug" },
+              { "type": "privateConfig", "name": "webcore_debug" }
+            ]
+        },
+        "webengine-noexecstack": {
+            "label": "linker supports -z noexecstack",
+            "condition": "config.unix && tests.webengine-noexecstack",
             "output": [ "privateFeature" ]
         }
     },
@@ -708,6 +741,7 @@
             "section": "Qt WebEngine",
             "entries": [
                 "webengine-embedded-build",
+                "webengine-full-debug-info",
                 "webengine-pepper-plugins",
                 "webengine-printing-and-pdf",
                 "webengine-proprietary-codecs",
@@ -719,6 +753,11 @@
                 "webengine-webchannel",
                 "webengine-v8-snapshot",
                 "webengine-kerberos",
+                {
+                    "type": "feature",
+                    "args": "webengine-ozone-x11",
+                    "condition": "config.unix"
+                },
                 {
                     "type": "feature",
                     "args": "webengine-v8-snapshot-support",
@@ -791,8 +830,7 @@
                         "webengine-system-png",
                         "webengine-system-jpeg",
                         "webengine-system-harfbuzz",
-                        "webengine-system-freetype",
-                        "webengine-system-x11"
+                        "webengine-system-freetype"
                     ]
                 },
                 {
@@ -810,6 +848,7 @@
                    "section": "Required system libraries for qpa-xcb",
                    "condition": "config.unix && !config.macos",
                    "entries": [
+                        "webengine-system-x11",
                         "webengine-system-libdrm",
                         "webengine-system-xcomposite",
                         "webengine-system-xcursor",

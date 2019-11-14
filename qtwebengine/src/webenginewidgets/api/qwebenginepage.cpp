@@ -256,12 +256,15 @@ QWebEnginePagePrivate::QWebEnginePagePrivate(QWebEngineProfile *_profile)
         ensureInitialized();
         wasShown();
     });
+
+    profile->d_ptr->addWebContentsAdapterClient(this);
 }
 
 QWebEnginePagePrivate::~QWebEnginePagePrivate()
 {
     delete history;
     delete settings;
+    profile->d_ptr->removeWebContentsAdapterClient(this);
 }
 
 RenderWidgetHostViewQtDelegate *QWebEnginePagePrivate::CreateRenderWidgetHostViewQtDelegate(RenderWidgetHostViewQtDelegateClient *client)
@@ -519,10 +522,11 @@ void QWebEnginePagePrivate::didPrintPage(quint64 requestId, const QByteArray &re
 #endif
 }
 
-void QWebEnginePagePrivate::passOnFocus(bool reverse)
+bool QWebEnginePagePrivate::passOnFocus(bool reverse)
 {
     if (view)
-        view->focusNextPrevChild(!reverse);
+        return view->focusNextPrevChild(!reverse);
+    return false;
 }
 
 void QWebEnginePagePrivate::authenticationRequired(QSharedPointer<AuthenticationDialogController> controller)
@@ -543,6 +547,13 @@ void QWebEnginePagePrivate::authenticationRequired(QSharedPointer<Authentication
     }
 
     controller->accept(networkAuth.user(), networkAuth.password());
+}
+
+void QWebEnginePagePrivate::releaseProfile()
+{
+    qDebug("Release of profile requested but WebEnginePage still not deleted. Expect troubles !");
+    // this is not the way to go, but might avoid the crash if user code does not make any calls to page.
+    delete q_ptr->d_ptr.take();
 }
 
 void QWebEnginePagePrivate::showColorDialog(QSharedPointer<ColorChooserController> controller)
@@ -639,6 +650,16 @@ void QWebEnginePagePrivate::updateAction(QWebEnginePage::WebAction action) const
     case QWebEnginePage::ViewSource:
         enabled = adapter->canViewSource();
         break;
+    case QWebEnginePage::Cut:
+    case QWebEnginePage::Copy:
+    case QWebEnginePage::Paste:
+    case QWebEnginePage::Undo:
+    case QWebEnginePage::Redo:
+    case QWebEnginePage::SelectAll:
+    case QWebEnginePage::PasteAndMatchStyle:
+    case QWebEnginePage::Unselect:
+        enabled = adapter->hasFocusedFrame();
+        break;
     default:
         break;
     }
@@ -655,6 +676,18 @@ void QWebEnginePagePrivate::updateNavigationActions()
     updateAction(QWebEnginePage::Reload);
     updateAction(QWebEnginePage::ReloadAndBypassCache);
     updateAction(QWebEnginePage::ViewSource);
+}
+
+void QWebEnginePagePrivate::updateEditActions()
+{
+    updateAction(QWebEnginePage::Cut);
+    updateAction(QWebEnginePage::Copy);
+    updateAction(QWebEnginePage::Paste);
+    updateAction(QWebEnginePage::Undo);
+    updateAction(QWebEnginePage::Redo);
+    updateAction(QWebEnginePage::SelectAll);
+    updateAction(QWebEnginePage::PasteAndMatchStyle);
+    updateAction(QWebEnginePage::Unselect);
 }
 
 #ifndef QT_NO_ACTION
@@ -735,24 +768,34 @@ void QWebEnginePagePrivate::bindPageAndView(QWebEnginePage *page, QWebEngineView
     auto oldView = page ? page->d_func()->view : nullptr;
     auto oldPage = view ? view->d_func()->page : nullptr;
 
+    bool ownNewPage = false;
+    bool deleteOldPage = false;
+
     // Change pointers first.
 
     if (page && oldView != view) {
-        if (oldView)
+        if (oldView) {
+            ownNewPage = oldView->d_func()->m_ownsPage;
             oldView->d_func()->page = nullptr;
+            oldView->d_func()->m_ownsPage = false;
+        }
         page->d_func()->view = view;
     }
 
     if (view && oldPage != page) {
-        if (oldPage)
-            oldPage->d_func()->view = nullptr;
+        if (oldPage) {
+            if (oldPage->d_func())
+                oldPage->d_func()->view = nullptr;
+            deleteOldPage = view->d_func()->m_ownsPage;
+        }
+        view->d_func()->m_ownsPage = ownNewPage;
         view->d_func()->page = page;
     }
 
     // Then notify.
 
     auto widget = page ? page->d_func()->widget : nullptr;
-    auto oldWidget = oldPage ? oldPage->d_func()->widget : nullptr;
+    auto oldWidget = (oldPage && oldPage->d_func()) ? oldPage->d_func()->widget : nullptr;
 
     if (page && oldView != view && oldView) {
         oldView->d_func()->pageChanged(page, nullptr);
@@ -761,10 +804,15 @@ void QWebEnginePagePrivate::bindPageAndView(QWebEnginePage *page, QWebEngineView
     }
 
     if (view && oldPage != page) {
-        view->d_func()->pageChanged(oldPage, page);
+        if (oldPage && oldPage->d_func())
+            view->d_func()->pageChanged(oldPage, page);
+        else
+            view->d_func()->pageChanged(nullptr, page);
         if (oldWidget != widget)
             view->d_func()->widgetChanged(oldWidget, widget);
     }
+    if (deleteOldPage)
+        delete oldPage;
 }
 
 void QWebEnginePagePrivate::bindPageAndWidget(QWebEnginePage *page, RenderWidgetHostViewQtDelegateWidget *widget)
@@ -775,7 +823,7 @@ void QWebEnginePagePrivate::bindPageAndWidget(QWebEnginePage *page, RenderWidget
     // Change pointers first.
 
     if (widget && oldPage != page) {
-        if (oldPage)
+        if (oldPage && oldPage->d_func())
             oldPage->d_func()->widget = nullptr;
         widget->m_page = page;
     }
@@ -788,7 +836,7 @@ void QWebEnginePagePrivate::bindPageAndWidget(QWebEnginePage *page, RenderWidget
 
     // Then notify.
 
-    if (widget && oldPage != page && oldPage) {
+    if (widget && oldPage != page && oldPage && oldPage->d_func()) {
         if (auto oldView = oldPage->d_func()->view)
             oldView->d_func()->widgetChanged(widget, nullptr);
     }
@@ -905,7 +953,7 @@ QWebEnginePage::QWebEnginePage(QObject* parent)
     \property QWebEnginePage::contentsSize
     \since 5.7
 
-    The size of the page contents.
+    \brief The size of the page contents.
 */
 
 /*!
@@ -967,11 +1015,13 @@ QWebEnginePage::QWebEnginePage(QWebEngineProfile *profile, QObject* parent)
 
 QWebEnginePage::~QWebEnginePage()
 {
-    Q_D(QWebEnginePage);
-    setDevToolsPage(nullptr);
-    d->adapter->stopFinding();
-    QWebEnginePagePrivate::bindPageAndView(this, nullptr);
-    QWebEnginePagePrivate::bindPageAndWidget(this, nullptr);
+    if (d_ptr) {
+        // d_ptr might be exceptionally null if profile adapter got deleted first
+        setDevToolsPage(nullptr);
+        d_ptr->adapter->stopFinding();
+        QWebEnginePagePrivate::bindPageAndView(this, nullptr);
+        QWebEnginePagePrivate::bindPageAndWidget(this, nullptr);
+    }
 }
 
 QWebEngineHistory *QWebEnginePage::history() const
@@ -1054,7 +1104,7 @@ void QWebEnginePage::setWebChannel(QWebChannel *channel, uint worldId)
 
 /*!
     \property QWebEnginePage::backgroundColor
-    \brief the page's background color behind the document's body.
+    \brief The page's background color behind the document's body.
     \since 5.6
 
     You can set the background color to Qt::transparent or to a translucent
@@ -1105,7 +1155,7 @@ void QWebEnginePage::save(const QString &filePath,
 
 /*!
     \property QWebEnginePage::audioMuted
-    \brief whether the current page audio is muted.
+    \brief Whether the current page audio is muted.
     \since 5.7
 
     The default value is \c false.
@@ -1127,7 +1177,7 @@ void QWebEnginePage::setAudioMuted(bool muted) {
 
 /*!
     \property QWebEnginePage::recentlyAudible
-    \brief the current page's \e {audible state}, that is, whether audio was recently played
+    \brief The current page's \e {audible state}, that is, whether audio was recently played
     or not.
     \since 5.7
 
@@ -1737,11 +1787,9 @@ void QWebEnginePagePrivate::allowCertificateError(const QSharedPointer<Certifica
     Q_Q(QWebEnginePage);
     bool accepted = false;
 
-    QWebEngineCertificateError error(controller->error(), controller->url(), controller->overridable() && !controller->strictEnforcement(), controller->errorString());
+    QWebEngineCertificateError error(controller->error(), controller->url(), controller->overridable(), controller->errorString());
     accepted = q->certificateError(error);
-
-    if (error.isOverridable())
-        controller->accept(accepted);
+    controller->accept(error.isOverridable() && accepted);
 }
 
 void QWebEnginePagePrivate::selectClientCert(const QSharedPointer<ClientCertSelectController> &controller)
@@ -1837,9 +1885,11 @@ void QWebEnginePagePrivate::setToolTip(const QString &toolTipText)
     }
 
     // Update tooltip if text was changed.
-    QString escapedTip = toolTipText.toHtmlEscaped().left(MaxTooltipLength);
-    if (view->toolTip() != escapedTip)
-        view->setToolTip(escapedTip);
+    QString wrappedTip = QLatin1String("<p style=\"white-space:pre-wrap\">")
+            % toolTipText.toHtmlEscaped().left(MaxTooltipLength)
+            % QLatin1String("</p>");
+    if (view->toolTip() != wrappedTip)
+        view->setToolTip(wrappedTip);
 }
 
 void QWebEnginePagePrivate::printRequested()
@@ -2046,7 +2096,7 @@ QUrl QWebEnginePage::requestedUrl() const
 
 /*!
     \property QWebEnginePage::iconUrl
-    \brief the URL of the icon associated with the page currently viewed
+    \brief The URL of the icon associated with the page currently viewed.
 
     By default, this property contains an empty URL.
 
@@ -2060,7 +2110,7 @@ QUrl QWebEnginePage::iconUrl() const
 
 /*!
     \property QWebEnginePage::icon
-    \brief the icon associated with the page currently viewed
+    \brief The icon associated with the page currently viewed.
     \since 5.7
 
     By default, this property contains a null icon. If the web page specifies more than one icon,
@@ -2131,7 +2181,7 @@ void QWebEnginePage::runJavaScript(const QString& scriptSource, quint32 worldId,
     In addition, a page might also execute scripts
     added through QWebEngineProfile::scripts().
 
-    \sa QWebEngineScriptCollection, QWebEngineScript
+    \sa QWebEngineScriptCollection, QWebEngineScript, {Script Injection}
 */
 
 QWebEngineScriptCollection &QWebEnginePage::scripts()

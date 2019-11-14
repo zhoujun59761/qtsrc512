@@ -196,16 +196,17 @@ InlineFlowBox* LayoutBlockFlow::CreateLineBoxes(LineLayoutItem line_layout_item,
       line_layout_item = LineLayoutItem(this);
     }
 
-    SECURITY_DCHECK(line_layout_item.IsLayoutInline() ||
-                    line_layout_item.IsEqual(this));
-
-    LineLayoutInline inline_flow(
-        !line_layout_item.IsEqual(this) ? line_layout_item : nullptr);
-
     // Get the last box we made for this layout object.
-    parent_box = inline_flow
-                     ? inline_flow.LastLineBox()
-                     : LineLayoutBlockFlow(line_layout_item).LastLineBox();
+    bool allowed_to_construct_new_box;
+    if (line_layout_item.IsLayoutInline()) {
+      LineLayoutInline inline_flow(line_layout_item);
+      parent_box = inline_flow.LastLineBox();
+      allowed_to_construct_new_box = inline_flow.AlwaysCreateLineBoxes();
+    } else {
+      DCHECK(line_layout_item.IsEqual(this));
+      parent_box = LineLayoutBlockFlow(line_layout_item).LastLineBox();
+      allowed_to_construct_new_box = true;
+    }
 
     // If this box or its ancestor is constructed then it is from a previous
     // line, and we need to make a new box for our line.  If this box or its
@@ -214,8 +215,6 @@ InlineFlowBox* LayoutBlockFlow::CreateLineBoxes(LineLayoutItem line_layout_item,
     // inline has actually been split in two on the same line (this can happen
     // with very fancy language mixtures).
     bool constructed_new_box = false;
-    bool allowed_to_construct_new_box =
-        !inline_flow || inline_flow.AlwaysCreateLineBoxes();
     bool can_use_existing_parent_box =
         parent_box && !ParentIsConstructedOrHaveNext(parent_box);
     if (allowed_to_construct_new_box && !can_use_existing_parent_box) {
@@ -1945,6 +1944,12 @@ void LayoutBlockFlow::LayoutInlineChildren(bool relayout_children,
   }
 
   if (FirstChild()) {
+    // In full layout mode, clear the line boxes of children upfront. Otherwise,
+    // siblings can run into stale root lineboxes during layout. Then layout
+    // the replaced elements later. In partial layout mode, line boxes are not
+    // deleted and only dirtied. In that case, we can layout the replaced
+    // elements at the same time.
+    Vector<LayoutBox*> atomic_inline_children;
     for (InlineWalker walker(LineLayoutBlockFlow(this)); !walker.AtEnd();
          walker.Advance()) {
       LayoutObject* o = walker.Current().GetLayoutObject();
@@ -1977,21 +1982,41 @@ void LayoutBlockFlow::LayoutInlineChildren(bool relayout_children,
           }
         } else if (is_full_layout || o->NeedsLayout()) {
           // Atomic inline.
+          DCHECK(o->IsAtomicInlineLevel());
           box->DirtyLineBoxes(is_full_layout);
-          o->LayoutIfNeeded();
+          // In full layout mode, defer laying out inline chlidren (adding any
+          // |InlineBox|es to |LineBoxes()|) to after all calls to
+          // |DirtyLineBoxesForObject()| is done.
+          if (is_full_layout)
+            atomic_inline_children.push_back(box);
+          else
+            o->LayoutIfNeeded();
         }
       } else if (o->IsText() ||
                  (o->IsLayoutInline() && !walker.AtEndOfInline())) {
         if (!o->IsText())
           ToLayoutInline(o)->UpdateAlwaysCreateLineBoxes(
               layout_state.IsFullLayout());
-        if (layout_state.IsFullLayout() || o->SelfNeedsLayout())
+        if (layout_state.IsFullLayout() || o->SelfNeedsLayout()) {
+          // In full layout mode, line boxes are deleted at the beginning of
+          // this function. It is critical to keep them empty here, because
+          // |DirtyLineBoxesForObject()| can destroy |InlineTextBox| without
+          // unlinking them from |LineBoxes()|.
+          DCHECK(!is_full_layout || !LineBoxes()->First());
           DirtyLineBoxesForObject(o, layout_state.IsFullLayout());
+        }
         o->ClearNeedsLayout();
       }
 
       if (IsInlineWithOutlineAndContinuation(*o))
         SetContainsInlineWithOutlineAndContinuation(true);
+    }
+
+    // Now all |DirtyLineBoxesForObject()| is done. We can safely start
+    // adding |InlineBox|es to |LineBoxes()|.
+    DCHECK(!is_full_layout || !LineBoxes()->First());
+    for (LayoutBox* atomic_inline_child : atomic_inline_children) {
+      atomic_inline_child->LayoutIfNeeded();
     }
 
     LayoutRunsAndFloats(layout_state);

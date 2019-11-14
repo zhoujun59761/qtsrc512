@@ -56,7 +56,7 @@ function(QT5_CREATE_TRANSLATION _qm_files)
         if(_my_sources)
           # make a list file to call lupdate on, so we don't make our commands too
           # long for some systems
-          get_filename_component(_ts_name ${_ts_file} NAME_WE)
+          get_filename_component(_ts_name ${_ts_file} NAME)
           set(_ts_lst_file "${CMAKE_CURRENT_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/${_ts_name}_lst_file")
           set(_lst_file_srcs)
           foreach(_lst_file_src ${_my_sources})
@@ -74,7 +74,8 @@ function(QT5_CREATE_TRANSLATION _qm_files)
         add_custom_command(OUTPUT ${_ts_file}
             COMMAND ${Qt5_LUPDATE_EXECUTABLE}
             ARGS ${_lupdate_options} "@${_ts_lst_file}" -ts ${_ts_file}
-            DEPENDS ${_my_sources} ${_ts_lst_file} VERBATIM)
+            DEPENDS ${_my_sources}
+            BYPRODUCTS ${_ts_lst_file} VERBATIM)
     endforeach()
     qt5_add_translation(${_qm_files} ${_my_tsfiles})
     set(${_qm_files} ${${_qm_files}} PARENT_SCOPE)

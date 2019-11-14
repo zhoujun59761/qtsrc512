@@ -130,7 +130,7 @@ PropertyKey StringObjectOwnPropertyKeyIterator::next(const QV4::Object *o, Prope
         return PropertyKey::fromArrayIndex(index);
     } else if (arrayIndex == slen) {
         if (s->arrayData()) {
-            arrayNode = s->sparseBegin();
+            SparseArrayNode *arrayNode = s->sparseBegin();
             // iterate until we're past the end of the string
             while (arrayNode && arrayNode->key() < slen)
                 arrayNode = arrayNode->nextNode();
@@ -765,9 +765,8 @@ static void appendReplacementString(QString *result, const QString &input, const
             i += skip;
             if (substStart != JSC::Yarr::offsetNoMatch && substEnd != JSC::Yarr::offsetNoMatch)
                 *result += input.midRef(substStart, substEnd - substStart);
-            else {
+            else if (skip == 0) // invalid capture reference. Taken as literal value
                 *result += replaceValue.at(i);
-            }
         } else {
             *result += replaceValue.at(i);
         }

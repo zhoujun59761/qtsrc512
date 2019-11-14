@@ -630,12 +630,12 @@ void WebContentsAdapter::load(const QWebEngineHttpRequest &request)
                                            "HTTP-POST data can only be sent over HTTP(S) protocol"));
             return;
         }
+
+        params.post_data = network::ResourceRequestBody::CreateFromBytes(
+                    (const char*)request.postData().constData(),
+                    request.postData().length());
         break;
     }
-
-    params.post_data = network::ResourceRequestBody::CreateFromBytes(
-                (const char*)request.postData().constData(),
-                request.postData().length());
 
     // convert the custom headers into the format that chromium expects
     QVector<QByteArray> headers = request.headers();
@@ -653,19 +653,23 @@ void WebContentsAdapter::load(const QWebEngineHttpRequest &request)
         }
     }
 
-    auto navigate = [](WebContentsAdapter *adapter, const content::NavigationController::LoadURLParams &params) {
+    auto navigate = [](QWeakPointer<WebContentsAdapter> weakAdapter, const content::NavigationController::LoadURLParams &params) {
+        WebContentsAdapter *adapter = weakAdapter.data();
+        if (!adapter)
+            return;
         adapter->webContents()->GetController().LoadURLWithParams(params);
         // Follow chrome::Navigate and invalidate the URL immediately.
         adapter->m_webContentsDelegate->NavigationStateChanged(adapter->webContents(), content::INVALIDATE_TYPE_URL);
         adapter->focusIfNecessary();
     };
 
+    QWeakPointer<WebContentsAdapter> weakThis(sharedFromThis());
     if (resizeNeeded) {
         // Schedule navigation on the event loop.
         content::BrowserThread::PostTask(
-            content::BrowserThread::UI, FROM_HERE, base::BindOnce(navigate, this, std::move(params)));
+            content::BrowserThread::UI, FROM_HERE, base::BindOnce(navigate, std::move(weakThis), std::move(params)));
     } else {
-        navigate(this, params);
+        navigate(std::move(weakThis), params);
     }
 }
 
@@ -987,6 +991,7 @@ quint64 WebContentsAdapter::findText(const QString &subString, bool caseSensitiv
         // waiting for it forever.
         // Assume that any unfinished find has been unsuccessful when a new one is started
         // to cover that case.
+        m_webContentsDelegate->setLastReceivedFindReply(m_lastFindRequestId);
         m_adapterClient->didFindText(m_lastFindRequestId, 0);
     }
 
@@ -1007,6 +1012,7 @@ quint64 WebContentsAdapter::findText(const QString &subString, bool caseSensitiv
 void WebContentsAdapter::stopFinding()
 {
     CHECK_INITIALIZED();
+    m_webContentsDelegate->setLastReceivedFindReply(m_lastFindRequestId);
     m_webContentsDelegate->setLastSearchedString(QString());
     m_webContents->StopFinding(content::STOP_FIND_ACTION_KEEP_SELECTION);
 }
@@ -1600,6 +1606,12 @@ bool WebContentsAdapter::isFindTextInProgress() const
 {
     CHECK_INITIALIZED(false);
     return m_lastFindRequestId != m_webContentsDelegate->lastReceivedFindReply();
+}
+
+bool WebContentsAdapter::hasFocusedFrame() const
+{
+    CHECK_INITIALIZED(false);
+    return m_webContents->GetFocusedFrame() != nullptr;
 }
 
 WebContentsAdapterClient::RenderProcessTerminationStatus

@@ -818,6 +818,16 @@ void QThread::quit()
 
 }
 
+void QThread::exit(int returnCode)
+{
+    Q_D(QThread);
+    d->data->quitNow = true;
+    for (int i = 0; i < d->data->eventLoops.size(); ++i) {
+        QEventLoop *eventLoop = d->data->eventLoops.at(i);
+        eventLoop->exit(returnCode);
+    }
+}
+
 bool QThread::wait(unsigned long time)
 {
     Q_UNUSED(time);
@@ -910,7 +920,7 @@ QThreadPrivate::~QThreadPrivate()
     \since 5.0
 
     Returns a pointer to the event dispatcher object for the thread. If no event
-    dispatcher exists for the thread, this function returns 0.
+    dispatcher exists for the thread, this function returns \nullptr.
 */
 QAbstractEventDispatcher *QThread::eventDispatcher() const
 {

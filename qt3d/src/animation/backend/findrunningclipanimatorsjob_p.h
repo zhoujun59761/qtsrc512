@@ -54,6 +54,7 @@
 
 #if defined(QT_BUILD_INTERNAL)
 class tst_FindRunningClipAnimatorsJob;
+class tst_UpdatePropertyMapJob;
 #endif
 
 QT_BEGIN_NAMESPACE
@@ -82,6 +83,7 @@ private:
 
 #if defined(QT_BUILD_INTERNAL)
     friend class ::tst_FindRunningClipAnimatorsJob;
+    friend class ::tst_UpdatePropertyMapJob;
 #endif
 };
 

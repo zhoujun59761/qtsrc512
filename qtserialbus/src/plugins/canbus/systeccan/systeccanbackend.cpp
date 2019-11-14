@@ -55,7 +55,7 @@ Q_GLOBAL_STATIC(QLibrary, systecLibrary)
 
 bool SystecCanBackend::canCreate(QString *errorReason)
 {
-    static bool symbolsResolved = resolveSymbols(systecLibrary());
+    static bool symbolsResolved = resolveSystecCanSymbols(systecLibrary());
     if (Q_UNLIKELY(!symbolsResolved)) {
         *errorReason = systecLibrary()->errorString();
         return false;
@@ -479,11 +479,11 @@ bool SystecCanBackend::open()
     if (!d->open())
         return false;
 
-    // Apply all stored configurations except bitrate, because
-    // the bitrate can not be applied after opening the device
+    // Apply all stored configurations except bitrate and receive own,
+    // because these cannot be applied after opening the device
     const QVector<int> keys = configurationKeys();
     for (int key : keys) {
-        if (key == QCanBusDevice::BitRateKey)
+        if (key == BitRateKey || key == ReceiveOwnKey)
             continue;
         const QVariant param = configurationParameter(key);
         const bool success = d->setConfigurationParameter(key, param);

@@ -60,6 +60,13 @@ precompile_header {
     gn_args += enable_precompiled_headers=false
 }
 
+CONFIG(release, debug|release):!isDeveloperBuild() {
+    gn_args += is_official_build=true
+} else {
+    gn_args += is_official_build=false
+    !isDeveloperBuild(): gn_args += is_unsafe_developer_build=false
+}
+
 CONFIG(release, debug|release) {
     gn_args += is_debug=false
     force_debug_info {
@@ -107,3 +114,7 @@ qtConfig(webengine-kerberos) {
 }
 
 !msvc: gn_args += enable_iterator_debugging=false
+
+ccache {
+    gn_args += cc_wrapper=\"ccache\"
+}

@@ -41,6 +41,7 @@
 #include <QtCore/qmap.h>
 #include <QtGui/private/qguiapplication_p.h>
 #include <QtGui/private/qtouchdevice_p.h>
+#include <QtGui/private/qevent_p.h>
 #include <QtQuick/private/qquickitem_p.h>
 #include <QtQuick/private/qquickpointerhandler_p.h>
 #include <QtQuick/private/qquickwindow_p.h>
@@ -864,8 +865,11 @@ void QQuickEventPoint::setGrabberItem(QQuickItem *grabber)
             QQuickWindowPrivate *windowPriv = QQuickWindowPrivate::get(grabber->window());
             windowPriv->sendUngrabEvent(oldGrabberItem, windowPriv->isDeliveringTouchAsMouse());
         }
-        for (QPointer<QQuickPointerHandler> passiveGrabber : m_passiveGrabbers)
-            passiveGrabber->onGrabChanged(passiveGrabber, OverrideGrabPassive, this);
+        if (grabber) {
+            for (QPointer<QQuickPointerHandler> passiveGrabber : m_passiveGrabbers)
+                if (passiveGrabber)
+                    passiveGrabber->onGrabChanged(passiveGrabber, OverrideGrabPassive, this);
+        }
     }
 }
 
@@ -910,10 +914,14 @@ void QQuickEventPoint::setGrabberPointerHandler(QQuickPointerHandler *grabber, b
                         passiveGrabber->onGrabChanged(grabber, OverrideGrabPassive, this);
                 }
             }
-            if (oldGrabberHandler)
+            if (oldGrabberHandler) {
                 oldGrabberHandler->onGrabChanged(oldGrabberHandler, (grabber ? CancelGrabExclusive : UngrabExclusive), this);
-            else if (oldGrabberItem && pointerEvent()->asPointerTouchEvent())
-                oldGrabberItem->touchUngrabEvent();
+            } else if (oldGrabberItem) {
+                if (pointerEvent()->asPointerTouchEvent())
+                    oldGrabberItem->touchUngrabEvent();
+                else if (pointerEvent()->asPointerMouseEvent())
+                    oldGrabberItem->mouseUngrabEvent();
+            }
             // touchUngrabEvent() can result in the grabber being set to null (MPTA does that, for example).
             // So set it again to ensure that final state is what we want.
             m_exclusiveGrabber = QPointer<QObject>(grabber);
@@ -1132,10 +1140,10 @@ void QQuickEventTouchPoint::reset(const QTouchEvent::TouchPoint &tp, ulong times
 struct PointVelocityData {
     QVector2D velocity;
     QPointF pos;
-    ulong timestamp;
+    ulong timestamp = 0;
 };
 
-typedef QMap<quint64, PointVelocityData*> PointDataForPointIdMap;
+typedef QMap<quint64, PointVelocityData> PointDataForPointIdMap;
 Q_GLOBAL_STATIC(PointDataForPointIdMap, g_previousPointData)
 static const int PointVelocityAgeLimit = 500; // milliseconds
 
@@ -1146,42 +1154,36 @@ static const int PointVelocityAgeLimit = 500; // milliseconds
 */
 QVector2D QQuickEventPoint::estimatedVelocity() const
 {
-    PointVelocityData *prevPoint = g_previousPointData->value(m_pointId);
-    if (!prevPoint) {
+    auto prevPointIt = g_previousPointData->find(m_pointId);
+    auto end = g_previousPointData->end();
+    if (prevPointIt == end) {
         // cleanup events older than PointVelocityAgeLimit
-        auto end = g_previousPointData->end();
         for (auto it = g_previousPointData->begin(); it != end; ) {
-            PointVelocityData *data = it.value();
-            if (m_timestamp - data->timestamp > PointVelocityAgeLimit) {
+            if (m_timestamp - it->timestamp > PointVelocityAgeLimit)
                 it = g_previousPointData->erase(it);
-                delete data;
-            } else {
+            else
                 ++it;
-            }
         }
-        // TODO optimize: stop this dynamic memory thrashing
-        prevPoint = new PointVelocityData;
-        prevPoint->velocity = QVector2D();
-        prevPoint->timestamp = 0;
-        prevPoint->pos = QPointF();
-        g_previousPointData->insert(m_pointId, prevPoint);
+        prevPointIt = g_previousPointData->insert(m_pointId, PointVelocityData());
     }
-    const ulong timeElapsed = m_timestamp - prevPoint->timestamp;
+
+    auto &prevPoint = prevPointIt.value();
+    const ulong timeElapsed = m_timestamp - prevPoint.timestamp;
     if (timeElapsed == 0)   // in case we call estimatedVelocity() twice on the same QQuickEventPoint
         return m_velocity;
 
     QVector2D newVelocity;
-    if (prevPoint->timestamp != 0)
-        newVelocity = QVector2D(m_scenePos - prevPoint->pos)/timeElapsed;
+    if (prevPoint.timestamp != 0)
+        newVelocity = QVector2D(m_scenePos - prevPoint.pos) / timeElapsed;
 
     // VERY simple kalman filter: does a weighted average
     // where the older velocities get less and less significant
     static const float KalmanGain = 0.7f;
     QVector2D filteredVelocity = newVelocity * KalmanGain + m_velocity * (1.0f - KalmanGain);
 
-    prevPoint->velocity = filteredVelocity;
-    prevPoint->pos = m_scenePos;
-    prevPoint->timestamp = m_timestamp;
+    prevPoint.velocity = filteredVelocity;
+    prevPoint.pos = m_scenePos;
+    prevPoint.timestamp = m_timestamp;
     return filteredVelocity;
 }
 
@@ -1827,6 +1829,7 @@ QTouchEvent *QQuickPointerTouchEvent::touchEventForItem(QQuickItem *item, bool i
     // but that would require changing tst_qquickwindow::touchEvent_velocity(): it expects transformed velocity
 
     bool anyPressOrReleaseInside = false;
+    bool anyStationaryWithModifiedPropertyInside = false;
     bool anyGrabber = false;
     QMatrix4x4 transformMatrix(QQuickItemPrivate::get(item)->windowToItemTransform());
     for (int i = 0; i < m_pointCount; ++i) {
@@ -1859,6 +1862,8 @@ QTouchEvent *QQuickPointerTouchEvent::touchEventForItem(QQuickItem *item, bool i
             anyPressOrReleaseInside = true;
         const QTouchEvent::TouchPoint *tp = touchPointById(p->pointId());
         if (tp) {
+            if (isInside && tp->d->stationaryWithModifiedProperty)
+                anyStationaryWithModifiedPropertyInside = true;
             eventStates |= tp->state();
             QTouchEvent::TouchPoint tpCopy = *tp;
             tpCopy.setPos(item->mapFromScene(tpCopy.scenePos()));
@@ -1872,7 +1877,8 @@ QTouchEvent *QQuickPointerTouchEvent::touchEventForItem(QQuickItem *item, bool i
 
     // Now touchPoints will have only points which are inside the item.
     // But if none of them were just pressed inside, and the item has no other reason to care, ignore them anyway.
-    if (eventStates == Qt::TouchPointStationary || touchPoints.isEmpty() || (!anyPressOrReleaseInside && !anyGrabber && !isFiltering))
+    if ((eventStates == Qt::TouchPointStationary && !anyStationaryWithModifiedPropertyInside) ||
+            touchPoints.isEmpty() || (!anyPressOrReleaseInside && !anyGrabber && !isFiltering))
         return nullptr;
 
     // if all points have the same state, set the event type accordingly

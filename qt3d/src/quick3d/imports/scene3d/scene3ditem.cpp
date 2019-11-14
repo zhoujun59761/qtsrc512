@@ -66,6 +66,7 @@
 #include <QtQuick/qquickrendercontrol.h>
 
 #include <Qt3DRender/private/qrendersurfaceselector_p.h>
+#include <Qt3DRender/private/qrenderaspect_p.h>
 #include <scene3dcleaner_p.h>
 #include <scene3dlogging_p.h>
 #include <scene3drenderer_p.h>
@@ -101,7 +102,21 @@ namespace Qt3DRender {
     The Scene3D type renders a Qt3D scene, provided by an \l Entity, into a
     multisampled Framebuffer object. This object is later blitted into a
     non-multisampled Framebuffer object, which is then rendered with
-    premultiplied alpha.
+    premultiplied alpha. If multisampling is not required, it can be avoided
+    by setting the \l multisample property to \c false. In this case
+    Scene3D will render directly into the non-multisampled Framebuffer object.
+
+    If the scene to be rendered includes non-opaque materials, you may need to
+    modify those materials with custom blend arguments in order for them to be
+    rendered correctly. For example, if working with a \l PhongAlphaMaterial and
+    a scene with an opaque clear color, you will likely want to add:
+
+    \qml
+    sourceAlphaArg: BlendEquationArguments.Zero
+    destinationAlphaArg: BlendEquationArguments.One
+    \endqml
+
+    to that material.
  */
 Scene3DItem::Scene3DItem(QQuickItem *parent)
     : QQuickItem(parent)
@@ -128,8 +143,12 @@ Scene3DItem::~Scene3DItem()
 /*!
     \qmlproperty list<string> Scene3D::aspects
 
-    \brief \TODO
-    */
+    The list of aspects that should be registered for the 3D scene.
+
+    For example, if the scene makes use of FrameAction, the \c "logic" aspect should be included in the list.
+
+    The \c "render" aspect is hardwired and does not need to be explicitly listed.
+*/
 QStringList Scene3DItem::aspects() const
 {
     return m_aspects;
@@ -140,7 +159,7 @@ QStringList Scene3DItem::aspects() const
 
     \default
 
-    \brief \TODO
+    The root entity of the 3D scene to be displayed.
  */
 Qt3DCore::QEntity *Scene3DItem::entity() const
 {
@@ -283,6 +302,7 @@ void Scene3DItem::setWindowSurface(QObject *rootObject)
             m_dummySurface = new QOffscreenSurface;
             m_dummySurface->setParent(qGuiApp); // parent to something suitably long-living
             m_dummySurface->setFormat(rw->format());
+            m_dummySurface->setScreen(rw->screen());
             m_dummySurface->create();
             surfaceSelector->setSurface(m_dummySurface);
         } else {
@@ -341,18 +361,7 @@ void Scene3DItem::updateCameraAspectRatio()
 /*!
     \qmlproperty bool Scene3D::multisample
 
-    \c true if a multi-sample render buffer is in use.
- */
-/*!
-    \return \c true if a multisample renderbuffer is in use.
- */
-bool Scene3DItem::multisample() const
-{
-    return m_multisample;
-}
-
-/*!
-    Enables or disables the usage of multisample renderbuffers based on \a enable.
+    \c true if a multisample render buffer is requested.
 
     By default multisampling is enabled. If the OpenGL implementation has no
     support for multisample renderbuffers or framebuffer blits, the request to
@@ -362,6 +371,11 @@ bool Scene3DItem::multisample() const
     and potentially slow initialization of framebuffers and other OpenGL
     resources.
  */
+bool Scene3DItem::multisample() const
+{
+    return m_multisample;
+}
+
 void Scene3DItem::setMultisample(bool enable)
 {
     if (m_multisample != enable) {
@@ -376,6 +390,9 @@ QSGNode *Scene3DItem::updatePaintNode(QSGNode *node, QQuickItem::UpdatePaintNode
     // If the render aspect wasn't created yet, do so now
     if (m_renderAspect == nullptr) {
         m_renderAspect = new QRenderAspect(QRenderAspect::Synchronous);
+        auto *rw = QQuickRenderControl::renderWindowFor(window());
+        static_cast<Qt3DRender::QRenderAspectPrivate *>(Qt3DRender::QRenderAspectPrivate::get(m_renderAspect))->m_screen =
+                (rw ? rw->screen() : window()->screen());
         m_aspectEngine->registerAspect(m_renderAspect);
     }
 

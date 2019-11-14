@@ -353,6 +353,7 @@ void QQmlDelegateModel::componentComplete()
     \l{QtQuick.XmlListModel::XmlListModel}{XmlListModel}.
 
     \sa {qml-data-models}{Data Models}
+    \keyword dm-model-property
 */
 QVariant QQmlDelegateModel::model() const
 {
@@ -493,11 +494,10 @@ void QQmlDelegateModel::setDelegate(QQmlComponent *delegate)
     \c view.qml:
     \snippet delegatemodel/delegatemodel_rootindex/view.qml 0
 
-    If the \l model is a QAbstractItemModel subclass, the delegate can also
-    reference a \c hasModelChildren property (optionally qualified by a
-    \e model. prefix) that indicates whether the delegate's model item has
-    any child nodes.
-
+    If the \l {dm-model-property}{model} is a QAbstractItemModel subclass,
+    the delegate can also reference a \c hasModelChildren property (optionally
+    qualified by a \e model. prefix) that indicates whether the delegate's
+    model item has any child nodes.
 
     \sa modelIndex(), parentModelIndex()
 */
@@ -699,6 +699,7 @@ QQmlDelegateModelGroup *QQmlDelegateModelPrivate::group_at(
     The following example illustrates using groups to select items in a model.
 
     \snippet delegatemodel/delegatemodelgroup.qml 0
+    \keyword dm-groups-property
 */
 
 QQmlListProperty<QQmlDelegateModelGroup> QQmlDelegateModel::groups()
@@ -1343,6 +1344,11 @@ void QQmlDelegateModel::_q_itemsInserted(int index, int count)
     const QList<QQmlDelegateModelItem *> cache = d->m_cache;
     for (int i = 0, c = cache.count();  i < c; ++i) {
         QQmlDelegateModelItem *item = cache.at(i);
+        // layout change triggered by changing the modelIndex might have
+        // already invalidated this item in d->m_cache and deleted it.
+        if (!d->m_cache.isSharedWith(cache) && !d->m_cache.contains(item))
+            continue;
+
         if (item->modelIndex() >= index) {
             const int newIndex = item->modelIndex() + count;
             const int row = newIndex;
@@ -1486,7 +1492,7 @@ void QQmlDelegateModel::_q_itemsRemoved(int index, int count)
         QQmlDelegateModelItem *item = cache.at(i);
         // layout change triggered by removal of a previous item might have
         // already invalidated this item in d->m_cache and deleted it
-        if (!d->m_cache.contains(item))
+        if (!d->m_cache.isSharedWith(cache) && !d->m_cache.contains(item))
             continue;
 
         if (item->modelIndex() >= index + count) {
@@ -1541,6 +1547,11 @@ void QQmlDelegateModel::_q_itemsMoved(int from, int to, int count)
     const QList<QQmlDelegateModelItem *> cache = d->m_cache;
     for (int i = 0, c = cache.count();  i < c; ++i) {
         QQmlDelegateModelItem *item = cache.at(i);
+        // layout change triggered by changing the modelIndex might have
+        // already invalidated this item in d->m_cache and deleted it.
+        if (!d->m_cache.isSharedWith(cache) && !d->m_cache.contains(item))
+            continue;
+
         if (item->modelIndex() >= from && item->modelIndex() < from + count) {
             const int newIndex = item->modelIndex() - from + to;
             const int row = newIndex;
@@ -1633,6 +1644,11 @@ void QQmlDelegateModel::_q_modelReset()
         const QList<QQmlDelegateModelItem *> cache = d->m_cache;
         for (int i = 0, c = cache.count();  i < c; ++i) {
             QQmlDelegateModelItem *item = cache.at(i);
+            // layout change triggered by changing the modelIndex might have
+            // already invalidated this item in d->m_cache and deleted it.
+            if (!d->m_cache.isSharedWith(cache) && !d->m_cache.contains(item))
+                continue;
+
             if (item->modelIndex() != -1)
                 item->setModelIndex(-1, -1, -1);
         }
@@ -2036,7 +2052,9 @@ void QV4::Heap::QQmlDelegateModelItemObject::destroy()
 }
 
 
-QQmlDelegateModelItem::QQmlDelegateModelItem(QQmlDelegateModelItemMetaType *metaType, int modelIndex, int row, int column)
+QQmlDelegateModelItem::QQmlDelegateModelItem(QQmlDelegateModelItemMetaType *metaType,
+                                             QQmlAdaptorModel::Accessors *accessor,
+                                             int modelIndex, int row, int column)
     : v4(metaType->v4Engine)
     , metaType(metaType)
     , contextData(nullptr)
@@ -2053,6 +2071,21 @@ QQmlDelegateModelItem::QQmlDelegateModelItem(QQmlDelegateModelItemMetaType *meta
     , column(column)
 {
     metaType->addref();
+
+    if (accessor->propertyCache) {
+        // The property cache in the accessor is common for all the model
+        // items in the model it wraps. It describes available model roles,
+        // together with revisioned properties like row, column and index, all
+        // which should be available in the delegate. We assign this cache to the
+        // model item so that the QML engine can use the revision information
+        // when resolving the properties (rather than falling back to just
+        // inspecting the QObject in the model item directly).
+        QQmlData *qmldata = QQmlData::get(this, true);
+        if (qmldata->propertyCache)
+            qmldata->propertyCache->release();
+        qmldata->propertyCache = accessor->propertyCache.data();
+        qmldata->propertyCache->addref();
+    }
 }
 
 QQmlDelegateModelItem::~QQmlDelegateModelItem()
@@ -2257,7 +2290,7 @@ void QQmlDelegateModelAttached::resetCurrentIndex()
 }
 
 /*!
-    \qmlattachedproperty int QtQml.Models::DelegateModel::model
+    \qmlattachedproperty model QtQml.Models::DelegateModel::model
 
     This attached property holds the data model this delegate instance belongs to.
 
@@ -2465,7 +2498,8 @@ void QQmlDelegateModelGroupPrivate::destroyingPackage(QQuickPackage *package)
     information about group membership and indexes as well as model data.  In combination
     with the move() function this can be used to implement view sorting, with remove() to filter
     items out of a view, or with setGroups() and \l Package delegates to categorize items into
-    different views.
+    different views. Different groups can only be sorted independently if they are disjunct. Moving
+    an item in one group will also move it in all other groups it is a part of.
 
     Data from models can be supplemented by inserting data directly into a DelegateModelGroup
     with the insert() function.  This can be used to introduce mock items into a view, or
@@ -2622,10 +2656,10 @@ QQmlV4Handle QQmlDelegateModelGroup::get(int index)
         model->m_cacheMetaType->initializePrototype();
     QV4::ExecutionEngine *v4 = model->m_cacheMetaType->v4Engine;
     QV4::Scope scope(v4);
+    ++cacheItem->scriptRef;
     QV4::ScopedObject o(scope, v4->memoryManager->allocate<QQmlDelegateModelItemObject>(cacheItem));
     QV4::ScopedObject p(scope, model->m_cacheMetaType->modelItemProto.value());
     o->setPrototypeOf(p);
-    ++cacheItem->scriptRef;
 
     return QQmlV4Handle(o);
 }
@@ -3077,6 +3111,11 @@ void QQmlDelegateModelGroup::setGroups(QQmlV4Function *args)
     \qmlmethod QtQml.Models::DelegateModelGroup::move(var from, var to, int count)
 
     Moves \a count at \a from in a group \a to a new position.
+
+    \note The DelegateModel acts as a proxy model: it holds the delegates in a
+    different order than the \l{dm-model-property}{underlying model} has them.
+    Any subsequent changes to the underlying model will not undo whatever
+    reordering you have done via this function.
 */
 
 void QQmlDelegateModelGroup::move(QQmlV4Function *args)

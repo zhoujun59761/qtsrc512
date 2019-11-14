@@ -501,7 +501,11 @@ bool qt_is_ascii(const char *&ptr, const char *end) Q_DECL_NOTHROW
     while (ptr + 4 <= end) {
         quint32 data = qFromUnaligned<quint32>(ptr);
         if (data &= 0x80808080U) {
+#if Q_BYTE_ORDER == Q_BIG_ENDIAN
+            uint idx = qCountLeadingZeroBits(data);
+#else
             uint idx = qCountTrailingZeroBits(data);
+#endif
             ptr += idx / 8;
             return false;
         }
@@ -1047,6 +1051,7 @@ static int ucstrncmp(const QChar *a, const uchar *c, size_t l)
     __m128i nullmask = _mm_setzero_si128();
     qptrdiff offset = 0;
 
+#  if !defined(__OPTIMIZE_SIZE__)
     // Using the PMOVMSKB instruction, we get two bits for each character
     // we compare.
     int retval;
@@ -1059,6 +1064,7 @@ static int ucstrncmp(const QChar *a, const uchar *c, size_t l)
         retval = uc[offset + idx / 2] - c[offset + idx / 2];
         return true;
     };
+#  endif
 
     // we're going to read uc[offset..offset+15] (32 bytes)
     // and c[offset..offset+15] (16 bytes)
@@ -1193,10 +1199,10 @@ static int qt_compare_strings(QLatin1String lhs, QStringView rhs, Qt::CaseSensit
 
 static int qt_compare_strings(QLatin1String lhs, QLatin1String rhs, Qt::CaseSensitivity cs) Q_DECL_NOTHROW
 {
-    if (cs == Qt::CaseInsensitive)
-        return qstrnicmp(lhs.data(), lhs.size(), rhs.data(), rhs.size());
     if (lhs.isEmpty())
         return lencmp(0, rhs.size());
+    if (cs == Qt::CaseInsensitive)
+        return qstrnicmp(lhs.data(), lhs.size(), rhs.data(), rhs.size());
     const auto l = std::min(lhs.size(), rhs.size());
     int r = qstrncmp(lhs.data(), rhs.data(), l);
     return r ? r : lencmp(lhs.size(), rhs.size());

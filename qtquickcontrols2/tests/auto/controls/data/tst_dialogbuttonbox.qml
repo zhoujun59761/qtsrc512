@@ -54,8 +54,8 @@ import QtQuick.Controls 2.12
 
 TestCase {
     id: testCase
-    width: 200
-    height: 200
+    width: 600
+    height: 400
     visible: true
     when: windowShown
     name: "DialogButtonBox"
@@ -288,8 +288,160 @@ TestCase {
         verify(button)
 
         // The button should never go outside of the box.
-        var buttonPosInBox = button.mapToItem(control, 0, 0)
-        verify(buttonPosInBox.x >= 0)
-        verify(buttonPosInBox.x + button.width < control.width)
+        tryVerify(function() { return button.mapToItem(control, 0, 0).x >= 0 },
+            1000, "Expected left edge of button to be within left edge of DialogButtonBox (i.e. greater than or equal to 0)" +
+                ", but it's " + button.mapToItem(control, 0, 0).x)
+        tryVerify(function() { return button.mapToItem(control, 0, 0).x + button.width <= control.width },
+            1000, "Expected right edge of button to be within right edge of DialogButtonBox (i.e. less than or equal to " +
+                control.width + "), but it's " + (button.mapToItem(control, 0, 0).x + button.width))
+    }
+
+    Component {
+        id: dialogComponent
+        // Based on the Default style, where a single button fills
+        // half the dialog's width and is aligned to the right.
+        Dialog {
+            id: control
+            standardButtons: Dialog.Ok
+            visible: true
+
+            footer: DialogButtonBox {
+                id: box
+                visible: count > 0
+                alignment: count === 1 ? Qt.AlignRight : undefined
+
+                implicitWidth: Math.max(implicitBackgroundWidth + leftInset + rightInset,
+                    (count === 1 ? implicitContentWidth * 2 : implicitContentWidth) + leftPadding + rightPadding)
+                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                    implicitContentHeight + topPadding + bottomPadding)
+                contentWidth: contentItem.contentWidth
+
+                delegate: Button {
+                    width: box.count === 1 ? box.availableWidth / 2 : undefined
+                }
+            }
+        }
+    }
+
+    // QTBUG-73860
+    function test_oneButtonAlignedRightInImplicitWidthBox() {
+        var dialog = createTemporaryObject(dialogComponent, testCase)
+        verify(dialog)
+
+        var box = dialog.footer
+        var listView = box.contentItem
+        waitForRendering(listView)
+
+        var button = box.itemAt(0)
+        verify(button)
+
+        // The button should never go outside of the box.
+        tryVerify(function() { return button.mapToItem(box, 0, 0).x >= 0 },
+            1000, "Expected left edge of button to be within left edge of DialogButtonBox (i.e. greater than or equal to 0)" +
+                ", but it's " + button.mapToItem(box, 0, 0).x)
+        tryVerify(function() { return button.mapToItem(box, 0, 0).x + button.width <= box.width },
+            1000, "Expected right edge of button to be within right edge of DialogButtonBox (i.e. less than or equal to " +
+                box.width + "), but it's " + (button.mapToItem(box, 0, 0).x + button.width))
+        compare(box.width, dialog.width)
+        // There's a single button and we align it to the right.
+        compare(box.contentItem.width, button.width)
+        compare(box.contentItem.x, box.width - box.rightPadding - box.contentItem.width)
+    }
+
+    Component {
+        id: customButtonBox
+
+        DialogButtonBox {
+            objectName: "customButtonBox"
+            alignment: Qt.AlignRight
+
+            property alias okButton: okButton
+
+            Button {
+                id: okButton
+                text: "OK"
+
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            }
+        }
+    }
+
+    Component {
+        id: customButtonBoxTwoButtons
+
+        DialogButtonBox {
+            objectName: "customButtonBoxTwoButtons"
+            alignment: Qt.AlignRight
+
+            property alias okButton: okButton
+
+            Button {
+                id: okButton
+                text: "OK"
+
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            }
+            Button {
+                text: "Cancel"
+
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+        }
+    }
+
+    function test_changeCustomButtonText_data() {
+        return [
+            { tag: "oneButton", component: customButtonBox },
+            { tag: "twoButtons", component: customButtonBoxTwoButtons },
+        ]
+    }
+
+    // QTBUG-72886
+    function test_changeCustomButtonText(data) {
+        var control = createTemporaryObject(customButtonBox, testCase, {})
+        verify(control)
+
+        var listView = control.contentItem
+        waitForRendering(listView)
+
+        var button = control.okButton
+        verify(button)
+        button.text = "some longer text";
+
+        // The button should never go outside of the box.
+        tryVerify(function() { return button.mapToItem(control, 0, 0).x >= 0 },
+            1000, "Expected left edge of button to be within left edge of DialogButtonBox (i.e. greater than or equal to 0)" +
+                ", but it's " + button.mapToItem(control, 0, 0).x)
+        tryVerify(function() { return button.mapToItem(control, 0, 0).x + button.width <= control.width },
+            1000, "Expected right edge of button to be within right edge of DialogButtonBox (i.e. less than or equal to " +
+                control.width + "), but it's " + (button.mapToItem(control, 0, 0).x + button.width))
+    }
+
+    Component {
+        id: noRolesDialog
+
+        Dialog {
+            footer: DialogButtonBox {
+                Button { text: "A" }
+                Button { text: "B" }
+                Button { text: "C" }
+            }
+        }
+    }
+
+    function test_orderWithNoRoles() {
+        for (var i = 0; i < 10; ++i) {
+            var control = createTemporaryObject(noRolesDialog, testCase)
+            verify(control)
+
+            control.open()
+            tryCompare(control, "opened", true)
+            var footer = control.footer
+            verify(footer)
+            waitForRendering(footer)
+            compare(footer.itemAt(0).text, "A")
+            compare(footer.itemAt(1).text, "B")
+            compare(footer.itemAt(2).text, "C")
+        }
     }
 }

@@ -48,6 +48,7 @@
 #include "content/public/common/content_features.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/net/chrome_mojo_proxy_resolver_factory.h"
+#include "chrome/common/chrome_switches.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/ct_log_verifier.h"
 #include "net/cert/ct_policy_enforcer.h"
@@ -87,13 +88,6 @@
 #include "type_conversion.h"
 
 namespace QtWebEngineCore {
-
-static const char* const kDefaultAuthSchemes[] = { net::kBasicAuthScheme,
-                                                   net::kDigestAuthScheme,
-#if QT_CONFIG(webengine_kerberos)
-                                                   net::kNegotiateAuthScheme,
-#endif
-                                                   net::kNtlmAuthScheme };
 
 static bool doNetworkSessionParamsMatch(const net::HttpNetworkSession::Params &first,
                                         const net::HttpNetworkSession::Params &second)
@@ -206,9 +200,11 @@ content::ResourceContext *ProfileIODataQt::resourceContext()
 void ProfileIODataQt::initializeOnIOThread()
 {
     m_networkDelegate.reset(new NetworkDelegateQt(this));
+    m_hostResolver = net::HostResolver::CreateDefaultResolver(NULL);
     m_urlRequestContext.reset(new net::URLRequestContext());
     m_urlRequestContext->set_network_delegate(m_networkDelegate.get());
     m_urlRequestContext->set_enable_brotli(base::FeatureList::IsEnabled(features::kBrotliEncoding));
+    m_urlRequestContext->set_host_resolver(m_hostResolver.get());
     // this binds factory to io thread
     m_weakPtr = m_weakPtrFactory.GetWeakPtr();
     QMutexLocker lock(&m_mutex);
@@ -295,10 +291,15 @@ void ProfileIODataQt::generateStorage()
     ct_verifier->AddLogs(ct_logs);
     m_storage->set_cert_transparency_verifier(std::move(ct_verifier));
     m_storage->set_ct_policy_enforcer(base::WrapUnique(new net::DefaultCTPolicyEnforcer()));
-    m_storage->set_host_resolver(net::HostResolver::CreateDefaultResolver(NULL));
     m_storage->set_ssl_config_service(std::make_unique<net::SSLConfigServiceDefaults>());
+    if (!m_httpAuthPreferences) {
+        m_httpAuthPreferences.reset(new net::HttpAuthPreferences());
+        std::string serverWhitelist = base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(switches::kAuthServerWhitelist);
+        m_httpAuthPreferences->SetServerWhitelist(serverWhitelist);
+    }
     m_storage->set_http_auth_handler_factory(net::HttpAuthHandlerFactory::CreateDefault(
-                                                 m_urlRequestContext->host_resolver()));
+                                                 m_urlRequestContext->host_resolver(),
+                                                 m_httpAuthPreferences.get()));
     m_storage->set_transport_security_state(std::make_unique<net::TransportSecurityState>());
 
     if (!m_dataPath.isEmpty()) {
