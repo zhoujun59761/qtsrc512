@@ -1127,6 +1127,26 @@ void DSCameraSession::updateSourceCapabilities()
                 pvi = reinterpret_cast<VIDEOINFOHEADER*>(pmt->pbFormat);
                 QSize resolution(pvi->bmiHeader.biWidth, pvi->bmiHeader.biHeight);
 
+                //modify by huan lele , on thinkpad x1 tablet , if the new pmt equal pixelformt and resolution has getted, reuse pVideoControl->GetFrameRateList
+                // will crash
+
+                bool find = false;
+                for (auto vfs : m_supportedViewfinderSettings) {
+                    if (vfs.resolution() == resolution) {
+                        qWarning() << "dscamerasession: updateSourceCapabilities  resloutin equal " << resolution;
+                    }
+                    if (vfs.pixelFormat() == pixelFormat && vfs.resolution() == resolution) {
+                        qWarning() << "dscamerasession: updateSourceCapabilities pxiel format equal and   resloutin equal " << resolution << pixelFormat;
+                        find = true;
+                        break;
+                    }
+                }
+                if (find == true) {
+                    DirectShowMediaType::deleteType(pmt);
+                    continue;
+                }
+                //end modify
+
                 QList<QCamera::FrameRateRange> frameRateRanges;
 
                 if (pVideoControl) {
@@ -1168,8 +1188,6 @@ void DSCameraSession::updateSourceCapabilities()
                     m_supportedViewfinderSettings.append(settings);
                     m_supportedFormats.append(DirectShowMediaType(*pmt));
                 }
-
-
             }
             DirectShowMediaType::deleteType(pmt);
         }

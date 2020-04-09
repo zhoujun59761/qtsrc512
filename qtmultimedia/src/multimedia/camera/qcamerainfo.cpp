@@ -129,7 +129,12 @@ QCameraInfo::QCameraInfo(const QByteArray &name)
         QMediaServiceProvider *provider = QMediaServiceProvider::defaultServiceProvider();
         const QByteArray service(Q_MEDIASERVICE_CAMERA);
         if (provider->devices(service).contains(name)) {
-            d->deviceName = QString::fromLatin1(name);
+            //modify by huan lele because dsvideodevicecontrol use devInfo.first = output.toUtf8();
+#ifdef Q_OS_WIN
+            //d->deviceName = QString::fromLatin1(name);
+            d->deviceName = QString::fromUtf8(name);
+#endif
+            //end modify
             d->description = provider->deviceDescription(service, name);
             d->position = provider->cameraPosition(name);
             d->orientation = provider->cameraOrientation(name);

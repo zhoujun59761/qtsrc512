@@ -350,7 +350,13 @@ QCamera::QCamera(const QByteArray& deviceName, QObject *parent):
     bool found = false;
     // Pass device name to service.
     if (d->deviceControl) {
-        const QString name = QString::fromLatin1(deviceName);
+        //modify by huan lele because dsvideodevicecontrol use devInfo.first = output.toUtf8();
+#ifdef Q_OS_WIN
+        //const QString name = QString::fromLatin1(deviceName);
+        const QString name = QString::fromUtf8(deviceName);
+#endif
+        //end modify
+
         for (int i = 0; i < d->deviceControl->deviceCount(); i++) {
             if (d->deviceControl->deviceName(i) == name) {
                 d->deviceControl->setSelectedDevice(i);
