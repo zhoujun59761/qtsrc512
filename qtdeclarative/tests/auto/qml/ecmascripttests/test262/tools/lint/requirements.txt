@@ -1,2 +1,2 @@
-PyYAML==3.11
+PyYAML==5.4
 inflect==0.2.5
