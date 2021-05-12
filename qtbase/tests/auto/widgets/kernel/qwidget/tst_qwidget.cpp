@@ -57,6 +57,7 @@
 #include <QtGui/qpaintengine.h>
 #include <QtGui/qbackingstore.h>
 #include <QtGui/qguiapplication.h>
+#include <QtGui/qpa/qplatformwindow.h>
 #include <QtGui/qscreen.h>
 #include <qmenubar.h>
 #include <qcompleter.h>
@@ -66,6 +67,7 @@
 #include <qproxystyle.h>
 #include <QtWidgets/QGraphicsView>
 #include <QtWidgets/QGraphicsProxyWidget>
+#include <QtWidgets/QSpinBox>
 #include <QtGui/qwindow.h>
 #include <qtimer.h>
 
@@ -179,6 +181,7 @@ private slots:
     void reverseTabOrder();
     void tabOrderWithProxy();
     void tabOrderWithCompoundWidgets();
+    void tabOrderWithCompoundWidgetsNoFocusPolicy();
     void tabOrderNoChange();
     void tabOrderNoChange2();
 #if defined(Q_OS_WIN) && !defined(Q_OS_WINRT)
@@ -221,6 +224,7 @@ private slots:
     void setFixedSize();
 
     void ensureCreated();
+    void createAndDestroy();
     void winIdChangeEvent();
     void persistentWinId();
     void showNativeChild();
@@ -396,6 +400,8 @@ private slots:
 
     void closeEvent();
     void closeWithChildWindow();
+
+    void deleteWindowInCloseEvent();
 
 private:
     bool ensureScreenSize(int width, int height);
@@ -1958,6 +1964,51 @@ static void dumpFocusChain(QWidget *start, bool bForward, const char *desc = nul
     Q_UNUSED(bForward)
     Q_UNUSED(desc)
 #endif
+}
+
+void tst_QWidget::tabOrderWithCompoundWidgetsNoFocusPolicy()
+{
+    Container container;
+    container.setWindowTitle(QLatin1String(QTest::currentTestFunction()));
+    QSpinBox spinbox1;
+    spinbox1.setObjectName("spinbox1");
+    QSpinBox spinbox2;
+    spinbox2.setObjectName("spinbox2");
+    QSpinBox spinbox3;
+    spinbox3.setObjectName("spinbox3");
+
+    spinbox1.setFocusPolicy(Qt::StrongFocus);
+    spinbox2.setFocusPolicy(Qt::NoFocus);
+    spinbox3.setFocusPolicy(Qt::StrongFocus);
+    container.box->addWidget(&spinbox1);
+    container.box->addWidget(&spinbox2);
+    container.box->addWidget(&spinbox3);
+
+    container.show();
+    container.activateWindow();
+
+    QApplication::setActiveWindow(&container);
+    if (!QTest::qWaitForWindowActive(&container))
+        QSKIP("Window failed to activate, skipping test");
+
+    QVERIFY2(spinbox1.hasFocus(),
+             qPrintable(QApplication::focusWidget()->objectName()));
+    container.tab();
+    QVERIFY2(!spinbox2.hasFocus(),
+             qPrintable(QApplication::focusWidget()->objectName()));
+    QVERIFY2(spinbox3.hasFocus(),
+             qPrintable(QApplication::focusWidget()->objectName()));
+    container.tab();
+    QVERIFY2(spinbox1.hasFocus(),
+             qPrintable(QApplication::focusWidget()->objectName()));
+    container.backTab();
+    QVERIFY2(spinbox3.hasFocus(),
+             qPrintable(QApplication::focusWidget()->objectName()));
+    container.backTab();
+    QVERIFY2(!spinbox2.hasFocus(),
+             qPrintable(QApplication::focusWidget()->objectName()));
+    QVERIFY2(spinbox1.hasFocus(),
+             qPrintable(QApplication::focusWidget()->objectName()));
 }
 
 void tst_QWidget::tabOrderNoChange()
@@ -4133,6 +4184,58 @@ public:
     QList<WId> m_winIdList;
     int winIdChangeEventCount() const { return m_winIdList.count(); }
 };
+
+class CreateDestroyWidget : public WinIdChangeWidget
+{
+public:
+    void create() { QWidget::create(); }
+    void destroy() { QWidget::destroy(); }
+};
+
+void tst_QWidget::createAndDestroy()
+{
+    CreateDestroyWidget widget;
+
+    // Create and destroy via QWidget
+    widget.create();
+    QVERIFY(widget.testAttribute(Qt::WA_WState_Created));
+    QCOMPARE(widget.winIdChangeEventCount(), 1);
+    QVERIFY(widget.internalWinId());
+
+    widget.destroy();
+    QVERIFY(!widget.testAttribute(Qt::WA_WState_Created));
+    QCOMPARE(widget.winIdChangeEventCount(), 2);
+    QVERIFY(!widget.internalWinId());
+
+    // Create via QWidget, destroy via QWindow
+    widget.create();
+    QVERIFY(widget.testAttribute(Qt::WA_WState_Created));
+    QCOMPARE(widget.winIdChangeEventCount(), 3);
+    QVERIFY(widget.internalWinId());
+
+    widget.windowHandle()->destroy();
+    QVERIFY(!widget.testAttribute(Qt::WA_WState_Created));
+    QCOMPARE(widget.winIdChangeEventCount(), 4);
+    QVERIFY(!widget.internalWinId());
+
+    // Create via QWidget again
+    widget.create();
+    QVERIFY(widget.testAttribute(Qt::WA_WState_Created));
+    QCOMPARE(widget.winIdChangeEventCount(), 5);
+    QVERIFY(widget.internalWinId());
+
+    // Destroy via QWindow, create via QWindow
+    widget.windowHandle()->destroy();
+    QVERIFY(widget.windowHandle());
+    QVERIFY(!widget.testAttribute(Qt::WA_WState_Created));
+    QCOMPARE(widget.winIdChangeEventCount(), 6);
+    QVERIFY(!widget.internalWinId());
+
+    widget.windowHandle()->create();
+    QVERIFY(widget.testAttribute(Qt::WA_WState_Created));
+    QCOMPARE(widget.winIdChangeEventCount(), 7);
+    QVERIFY(widget.internalWinId());
+}
 
 void tst_QWidget::winIdChangeEvent()
 {
@@ -11088,6 +11191,24 @@ void tst_QWidget::closeWithChildWindow()
     widget.show();
     QVERIFY(QTest::qWaitForWindowExposed(&widget));
     QVERIFY(!childWidget->isVisible());
+}
+
+class DeleteOnCloseEventWidget : public QWidget
+{
+protected:
+    virtual void closeEvent(QCloseEvent *e) override
+    {
+        e->accept();
+        delete this;
+    }
+};
+
+void tst_QWidget::deleteWindowInCloseEvent()
+{
+    // Just checking if closing this widget causes a crash
+    auto widget = new DeleteOnCloseEventWidget;
+    widget->close();
+    QVERIFY(true);
 }
 
 QTEST_MAIN(tst_QWidget)

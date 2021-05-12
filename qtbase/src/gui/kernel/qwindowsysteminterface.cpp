@@ -57,7 +57,6 @@ QT_BEGIN_NAMESPACE
 
 QElapsedTimer QWindowSystemInterfacePrivate::eventTime;
 bool QWindowSystemInterfacePrivate::synchronousWindowSystemEvents = false;
-bool QWindowSystemInterfacePrivate::platformFiltersEvents = false;
 bool QWindowSystemInterfacePrivate::TabletEvent::platformSynthesizesMouse = true;
 QWaitCondition QWindowSystemInterfacePrivate::eventsFlushed;
 QMutex QWindowSystemInterfacePrivate::flushEventMutex;
@@ -619,6 +618,7 @@ bool QWindowSystemInterface::isTouchDeviceRegistered(const QTouchDevice *device)
 static int g_nextPointId = 1;
 
 // map from device-independent point id (arbitrary) to "Qt point" ids
+QMutex QWindowSystemInterfacePrivate::pointIdMapMutex;
 typedef QMap<quint64, int> PointIdMap;
 Q_GLOBAL_STATIC(PointIdMap, g_pointIdMap)
 
@@ -636,6 +636,8 @@ Q_GLOBAL_STATIC(PointIdMap, g_pointIdMap)
 */
 static int acquireCombinedPointId(quint8 deviceId, int pointId)
 {
+    QMutexLocker locker(&QWindowSystemInterfacePrivate::pointIdMapMutex);
+
     quint64 combinedId64 = (quint64(deviceId) << 32) + pointId;
     auto it = g_pointIdMap->constFind(combinedId64);
     int uid;
@@ -695,6 +697,8 @@ QList<QTouchEvent::TouchPoint>
     }
 
     if (states == Qt::TouchPointReleased) {
+        QMutexLocker locker(&QWindowSystemInterfacePrivate::pointIdMapMutex);
+
         // All points on deviceId have been released.
         // Remove all points associated with that device from g_pointIdMap.
         // (On other devices, some touchpoints might still be pressed.
@@ -714,6 +718,7 @@ QList<QTouchEvent::TouchPoint>
 
 void QWindowSystemInterfacePrivate::clearPointIdMap()
 {
+    QMutexLocker locker(&QWindowSystemInterfacePrivate::pointIdMapMutex);
     g_pointIdMap->clear();
     g_nextPointId = 1;
 }
@@ -1131,15 +1136,10 @@ bool QWindowSystemInterface::sendWindowSystemEvents(QEventLoop::ProcessEventsFla
     int nevents = 0;
 
     while (QWindowSystemInterfacePrivate::windowSystemEventsQueued()) {
-        QWindowSystemInterfacePrivate::WindowSystemEvent *event = nullptr;
-
-        if (QWindowSystemInterfacePrivate::platformFiltersEvents) {
-            event = QWindowSystemInterfacePrivate::getWindowSystemEvent();
-        } else {
-            event = flags & QEventLoop::ExcludeUserInputEvents ?
+        QWindowSystemInterfacePrivate::WindowSystemEvent *event =
+                flags & QEventLoop::ExcludeUserInputEvents ?
                         QWindowSystemInterfacePrivate::getNonUserInputWindowSystemEvent() :
                         QWindowSystemInterfacePrivate::getWindowSystemEvent();
-        }
         if (!event)
             break;
 
@@ -1176,21 +1176,6 @@ int QWindowSystemInterface::windowSystemEventsQueued()
 bool QWindowSystemInterface::nonUserInputEventsQueued()
 {
     return QWindowSystemInterfacePrivate::nonUserInputEventsQueued();
-}
-
-/*!
-    Platforms that implement UserInputEvent filtering at native event level must
-    set this property to \c true. The default is \c false, which means that event
-    filtering logic is handled by QWindowSystemInterface. Doing the filtering in
-    platform plugins is necessary when supporting AbstractEventDispatcher::filterNativeEvent(),
-    which should respect flags that were passed to event dispatcher's processEvents()
-    call.
-
-    \since 5.12
-*/
-void QWindowSystemInterface::setPlatformFiltersEvents(bool enable)
-{
-    QWindowSystemInterfacePrivate::platformFiltersEvents = enable;
 }
 
 // --------------------- QtTestLib support ---------------------

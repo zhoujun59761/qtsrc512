@@ -319,8 +319,9 @@ ScriptPromise OfflineAudioContext::resumeContext(ScriptState* script_state) {
     return promise;
   }
 
-  // If the context is in a closed state, reject the promise.
-  if (ContextState() == AudioContextState::kClosed) {
+  // If the context is in a closed state or it really is closed (cleared),
+  // reject the promise.
+  if (IsContextClosed()) {
     resolver->Reject(
         DOMException::Create(DOMExceptionCode::kInvalidStateError,
                              "cannot resume a closed offline context"));
@@ -457,6 +458,15 @@ void OfflineAudioContext::RejectPendingResolvers() {
   DCHECK_EQ(resume_resolvers_.size(), 0u);
 
   RejectPendingDecodeAudioDataResolvers();
+}
+
+bool OfflineAudioContext::IsPullingAudioGraph() const {
+  DCHECK(IsMainThread());
+
+  // For an offline context, we're rendering only while the context is running.
+  // Unlike an AudioContext, there's no audio device that keeps pulling on graph
+  // after the context has finished rendering.
+  return ContextState() == BaseAudioContext::kRunning;
 }
 
 bool OfflineAudioContext::ShouldSuspend() {

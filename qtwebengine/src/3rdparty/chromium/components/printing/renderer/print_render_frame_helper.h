@@ -433,6 +433,7 @@ class PrintRenderFrameHelper
     // Helper functions
     int GetNextPageNumber();
     bool IsRendering() const;
+    bool IsPlugin() const;
     bool IsModifiable() const;
     bool HasSelection();
     bool IsLastPageOfPrintReadyMetafile() const;
@@ -469,7 +470,7 @@ class PrintRenderFrameHelper
     // Reset some of the internal rendering context.
     void ClearContext();
 
-    void CalculateIsModifiable();
+    void CalculatePluginAttributes();
 
     // Specifies what to render for print preview.
     FrameReference source_frame_;
@@ -486,6 +487,9 @@ class PrintRenderFrameHelper
 
     // List of page indices that need to be rendered.
     std::vector<int> pages_to_render_;
+
+    // True, if the document source is a plugin.
+    bool is_plugin_ = false;
 
     // True, if the document source is modifiable. e.g. HTML and not PDF.
     bool is_modifiable_;
@@ -528,6 +532,7 @@ class PrintRenderFrameHelper
   bool is_scripted_preview_delayed_;
   int ipc_nesting_level_;
   bool render_frame_gone_;
+  bool delete_pending_;
 
   // Used to fix a race condition where the source is a PDF and print preview
   // hangs because RequestPrintPreview is called before DidStopLoading() is

@@ -473,12 +473,15 @@ void Chunk::sortIntoBins(HeapItem **bins, uint nBins)
             uint freeStart = i*Bits + index;
             usedSlots &= ~((static_cast<quintptr>(1) << index) - 1);
             while (!usedSlots) {
-                ++i;
-                if (i == EntriesInBitmap) {
-                    usedSlots = (quintptr)-1;
+                if (++i < EntriesInBitmap) {
+                    usedSlots = (objectBitmap[i]|extendsBitmap[i]);
+                } else {
+                    Q_ASSERT(i == EntriesInBitmap);
+                    // Overflows to 0 when counting trailing zeroes above in next iteration.
+                    // Then, all the bits are zeroes and we break.
+                    usedSlots = std::numeric_limits<quintptr>::max();
                     break;
                 }
-                usedSlots = (objectBitmap[i]|extendsBitmap[i]);
 #ifndef QT_NO_DEBUG
                 allocatedSlots += qPopulationCount(usedSlots);
 //                qDebug() << hex << "   i=" << i << "used=" << usedSlots;
@@ -1209,6 +1212,8 @@ void MemoryManager::collectFromJSStack(MarkStack *markStack) const
             Q_ASSERT(m->inUse());
             // Skip pointers to already freed objects, they are bogus as well
             m->mark(markStack);
+            if (markStack->top >= markStack->limit)
+                markStack->drain();
         }
         ++v;
     }

@@ -1662,8 +1662,7 @@ Network.NetworkLogView = class extends UI.VBox {
     const requestContentType = request.requestContentType();
     const formData = await request.requestFormData();
     if (requestContentType && requestContentType.startsWith('application/x-www-form-urlencoded') && formData) {
-      data.push('--data');
-      data.push(escapeString(formData));
+      data.push('--data-raw ' + escapeString(formData));
       ignoredHeaders['content-length'] = true;
       inferredMethod = 'POST';
     } else if (formData) {
@@ -1675,7 +1674,7 @@ Network.NetworkLogView = class extends UI.VBox {
 
     if (request.requestMethod !== inferredMethod) {
       command.push('-X');
-      command.push(request.requestMethod);
+      command.push(escapeString(request.requestMethod));
     }
 
     const requestHeaders = request.requestHeaders();

@@ -155,7 +155,8 @@ void WorkerGlobalScope::importScripts(const Vector<String>& urls,
       return;
     }
     if (!GetContentSecurityPolicy()->AllowScriptFromSource(
-            url, AtomicString(), IntegrityMetadataSet(), kNotParserInserted)) {
+            url, AtomicString(), IntegrityMetadataSet(), kNotParserInserted,
+            url, RedirectStatus::kNoRedirect)) {
       exception_state.ThrowDOMException(
           DOMExceptionCode::kNetworkError,
           "The script at '" + url.ElidedString() + "' failed to load.");
@@ -198,7 +199,9 @@ void WorkerGlobalScope::importScripts(const Vector<String>& urls,
         source_code.length(), cached_meta_data ? cached_meta_data->size() : 0);
     ScriptController()->Evaluate(
         ScriptSourceCode(source_code, ScriptSourceLocationType::kUnknown,
-                         handler, response_url),
+                         handler,
+                         ScriptSourceCode::UsePostRedirectURL() ? response_url
+                                                                : complete_url),
         &error_event, v8_cache_options_);
     if (error_event) {
       ScriptController()->RethrowExceptionFromImportedScript(error_event,

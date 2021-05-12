@@ -328,6 +328,7 @@ class WebLocalFrame : public WebFrame {
                                  const WebURL& mixed_content_url,
                                  WebURLRequest::RequestContext,
                                  bool was_allowed,
+                                 const WebURL& url_before_redirects,
                                  bool had_redirect,
                                  const WebSourceLocation&) = 0;
 
@@ -774,13 +775,16 @@ class WebLocalFrame : public WebFrame {
   // This function should be called before pairs of PrintBegin() and PrintEnd().
   virtual void DispatchBeforePrintEvent() = 0;
 
+  // Get the plugin to print, if any. The |constrain_to_node| parameter is the
+  // same as the one for PrintBegin() below.
+  virtual WebPlugin* GetPluginToPrint(const WebNode& constrain_to_node) = 0;
+
   // Reformats the WebFrame for printing. WebPrintParams specifies the printable
   // content size, paper size, printable area size, printer DPI and print
-  // scaling option. If constrainToNode node is specified, then only the given
+  // scaling option. If |constrain_to_node| is specified, then only the given
   // node is printed (for now only plugins are supported), instead of the entire
   // frame.
-  // Returns the number of pages that can be printed at the given
-  // page size.
+  // Returns the number of pages that can be printed at the given page size.
   virtual int PrintBegin(const WebPrintParams&,
                          const WebNode& constrain_to_node = WebNode()) = 0;
 

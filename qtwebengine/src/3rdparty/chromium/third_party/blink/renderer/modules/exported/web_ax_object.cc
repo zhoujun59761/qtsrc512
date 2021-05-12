@@ -97,7 +97,6 @@ class WebAXSparseAttributeClientAdapter : public AXSparseAttributeClient {
   }
 };
 
-#if DCHECK_IS_ON()
 // It's not safe to call some WebAXObject APIs if a layout is pending.
 // Clients should call updateLayoutAndCheckValidity first.
 static bool IsLayoutClean(Document* document) {
@@ -109,7 +108,6 @@ static bool IsLayoutClean(Document* document) {
                DocumentLifecycle::kLayoutSubtreeChangeClean) &&
           !document->View()->NeedsLayout());
 }
-#endif
 
 WebScopedAXContext::WebScopedAXContext(WebDocument& root_document)
     : private_(ScopedAXObjectCache::Create(*root_document.Unwrap<Document>())) {
@@ -1025,28 +1023,11 @@ WebDocument WebAXObject::GetDocument() const {
   return WebDocument(document);
 }
 
-bool WebAXObject::HasComputedStyle() const {
-  if (IsDetached())
-    return false;
-
-  Document* document = private_->GetDocument();
-  if (document)
-    document->UpdateStyleAndLayoutTree();
-
-  Node* node = private_->GetNode();
-  if (!node)
-    return false;
-
-  return node->EnsureComputedStyle();
-}
-
 WebString WebAXObject::ComputedStyleDisplay() const {
   if (IsDetached())
     return WebString();
 
-  Document* document = private_->GetDocument();
-  if (document)
-    document->UpdateStyleAndLayoutTree();
+  DCHECK(IsLayoutClean(private_->GetDocument()));
 
   Node* node = private_->GetNode();
   if (!node)
@@ -1381,9 +1362,7 @@ void WebAXObject::GetRelativeBounds(WebAXObject& offset_container,
   if (IsDetached())
     return;
 
-#if DCHECK_IS_ON()
   DCHECK(IsLayoutClean(private_->GetDocument()));
-#endif
 
   AXObject* container = nullptr;
   FloatRect bounds;
