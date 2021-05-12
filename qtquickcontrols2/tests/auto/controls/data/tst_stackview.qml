@@ -804,7 +804,10 @@ TestCase {
         var item = control.push(component, StackView.Immediate)
         verify(item)
 
-        item.StackView.onRemoved.connect(function() { control.push(component, StackView.Immediate) } )
+        item.StackView.onRemoved.connect(function() {
+            ignoreWarning(/.*QML StackView: cannot push while already in the process of completing a pop/)
+            control.push(component, StackView.Immediate)
+        })
 
         // don't crash (QTBUG-62153)
         control.pop(StackView.Immediate)
@@ -1244,5 +1247,128 @@ TestCase {
         verify(control)
         gc()
         verify(control.initialItem)
+    }
+
+    // Need to use this specific structure in order to reproduce the crash.
+    Component {
+        id: clearUponDestructionContainerComponent
+
+        Item {
+            id: container
+            objectName: "container"
+
+            property alias control: stackView
+            property var onDestructionCallback
+
+            property Component clearUponDestructionComponent: Component {
+                id: clearUponDestructionComponent
+
+                Item {
+                    objectName: "clearUponDestructionItem"
+                    Component.onDestruction: container.onDestructionCallback(stackView)
+                }
+            }
+
+            StackView {
+                id: stackView
+                initialItem: Item {
+                    objectName: "initialItem"
+                }
+            }
+        }
+    }
+
+    // QTBUG-80353
+    // Tests that calling clear() in Component.onDestruction in response to that
+    // item being removed (e.g. via an earlier call to clear()) results in a warning and not a crash.
+    function test_recursiveClearClear() {
+        let container = createTemporaryObject(clearUponDestructionContainerComponent, testCase,
+            { onDestructionCallback: function(stackView) { stackView.clear(StackView.Immediate) }})
+        verify(container)
+
+        let control = container.control
+        control.push(container.clearUponDestructionComponent, StackView.Immediate)
+
+        // Shouldn't crash.
+        ignoreWarning(/.*cannot clear while already in the process of completing a clear/)
+        control.clear(StackView.Immediate)
+    }
+
+    function test_recursivePopClear() {
+        let container = createTemporaryObject(clearUponDestructionContainerComponent, testCase,
+            { onDestructionCallback: function(stackView) { stackView.clear(StackView.Immediate) }})
+        verify(container)
+
+        let control = container.control
+        control.push(container.clearUponDestructionComponent, StackView.Immediate)
+
+        // Pop all items except the first, removing the second item we pushed in the process.
+        // Shouldn't crash.
+        ignoreWarning(/.*cannot clear while already in the process of completing a pop/)
+        control.pop(null, StackView.Immediate)
+    }
+
+    function test_recursivePopPop() {
+        let container = createTemporaryObject(clearUponDestructionContainerComponent, testCase,
+            { onDestructionCallback: function(stackView) { stackView.pop(null, StackView.Immediate) }})
+        verify(container)
+
+        let control = container.control
+        // Push an extra item so that we can call pop(null) and reproduce the conditions for the crash.
+        control.push(component, StackView.Immediate)
+        control.push(container.clearUponDestructionComponent, StackView.Immediate)
+
+        // Pop the top item, then pop down to the first item in response.
+        ignoreWarning(/.*cannot pop while already in the process of completing a pop/)
+        control.pop(StackView.Immediate)
+    }
+
+    function test_recursiveReplaceClear() {
+        let container = createTemporaryObject(clearUponDestructionContainerComponent, testCase,
+            { onDestructionCallback: function(stackView) { stackView.clear(StackView.Immediate) }})
+        verify(container)
+
+        let control = container.control
+        control.push(container.clearUponDestructionComponent, StackView.Immediate)
+
+        // Replace the top item, then clear in response.
+        ignoreWarning(/.*cannot clear while already in the process of completing a replace/)
+        control.replace(component, StackView.Immediate)
+    }
+
+    function test_recursiveClearReplace() {
+        let container = createTemporaryObject(clearUponDestructionContainerComponent, testCase,
+            { onDestructionCallback: function(stackView) { stackView.replace(component, StackView.Immediate) }})
+        verify(container)
+
+        let control = container.control
+        control.push(container.clearUponDestructionComponent, StackView.Immediate)
+
+        // Replace the top item, then clear in response.
+        ignoreWarning(/.*cannot replace while already in the process of completing a clear/)
+        control.clear(StackView.Immediate)
+    }
+
+    // QTBUG-84381
+    function test_clearAndPushAfterDepthChange() {
+        var control = createTemporaryObject(stackView, testCase, {
+            popEnter: null, popExit: null, pushEnter: null,
+            pushExit: null, replaceEnter: null, replaceExit: null
+        })
+        verify(control)
+
+        control.depthChanged.connect(function() {
+            if (control.depth === 2) {
+                // Shouldn't assert.
+                ignoreWarning(/.*QML StackView: cannot clear while already in the process of completing a push/)
+                control.clear()
+                // Shouldn't crash.
+                ignoreWarning(/.*QML StackView: cannot push while already in the process of completing a push/)
+                control.push(component)
+            }
+        })
+
+        control.push(component)
+        control.push(component)
     }
 }

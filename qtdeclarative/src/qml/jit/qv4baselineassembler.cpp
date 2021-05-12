@@ -91,6 +91,8 @@ public:
         PlatformAssemblerCommon::callRuntime(functionName, funcPtr);
         if (dest == CallResultDestination::InAccumulator)
             saveReturnValueInAccumulator();
+        else if (AccumulatorRegister == ReturnValueRegister)
+            loadUndefined();
     }
 
     void saveReturnValueInAccumulator()
@@ -391,6 +393,8 @@ public:
         PlatformAssemblerCommon::callRuntime(functionName, funcPtr);
         if (dest == CallResultDestination::InAccumulator)
             saveReturnValueInAccumulator();
+        else if (AccumulatorRegisterValue == ReturnValueRegisterValue)
+            loadUndefined();
     }
 
     void saveReturnValueInAccumulator()
@@ -920,7 +924,7 @@ void BaselineAssembler::loadValue(ReturnedValue value)
 
 void BaselineAssembler::storeHeapObject(int reg)
 {
-    pasm()->storeHeapObject(PlatformAssembler::ReturnValueRegisterValue, regAddr(reg));
+    pasm()->storeHeapObject(PlatformAssembler::AccumulatorRegisterValue, regAddr(reg));
 }
 
 void BaselineAssembler::loadImport(int index)

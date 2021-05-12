@@ -1501,20 +1501,27 @@ void WebLocalFrameImpl::DispatchPrintEventRecursively(
   }
 }
 
-int WebLocalFrameImpl::PrintBegin(const WebPrintParams& print_params,
-                                  const WebNode& constrain_to_node) {
-  DCHECK(!GetFrame()->GetDocument()->IsFrameSet());
-  WebPluginContainerImpl* plugin_container = nullptr;
+WebPluginContainerImpl* WebLocalFrameImpl::GetPluginToPrintHelper(
+    const WebNode& constrain_to_node) {
   if (constrain_to_node.IsNull()) {
     // If this is a plugin document, check if the plugin supports its own
-    // printing. If it does, we will delegate all printing to that.
-    plugin_container = GetFrame()->GetWebPluginContainer();
-  } else {
-    // We only support printing plugin nodes for now.
-    plugin_container =
-        ToWebPluginContainerImpl(constrain_to_node.PluginContainer());
+    // printing. If it does, we will delegate all printing to that.a
+    return GetFrame()->GetWebPluginContainer();
   }
+  return ToWebPluginContainerImpl(constrain_to_node.PluginContainer());
+}
 
+WebPlugin* WebLocalFrameImpl::GetPluginToPrint(
+    const WebNode& constrain_to_node) {
+  WebPluginContainerImpl* plugin_container =
+      GetPluginToPrintHelper(constrain_to_node);
+  return plugin_container ? plugin_container->Plugin() : nullptr;
+}
+
+int WebLocalFrameImpl::PrintBegin(const WebPrintParams& print_params,
+                                  const WebNode& constrain_to_node) {
+  WebPluginContainerImpl* plugin_container =
+      GetPluginToPrintHelper(constrain_to_node);
   if (plugin_container && plugin_container->SupportsPaginatedPrint()) {
     print_context_ = new ChromePluginPrintContext(GetFrame(), plugin_container,
                                                   print_params);
@@ -2250,6 +2257,7 @@ void WebLocalFrameImpl::MixedContentFound(
     const WebURL& mixed_content_url,
     WebURLRequest::RequestContext request_context,
     bool was_allowed,
+    const WebURL& url_before_redirects,
     bool had_redirect,
     const WebSourceLocation& source_location) {
   DCHECK(GetFrame());
@@ -2261,7 +2269,7 @@ void WebLocalFrameImpl::MixedContentFound(
   }
   MixedContentChecker::MixedContentFound(
       GetFrame(), main_resource_url, mixed_content_url, request_context,
-      was_allowed, had_redirect, std::move(source));
+      was_allowed, url_before_redirects, had_redirect, std::move(source));
 }
 
 void WebLocalFrameImpl::ClientDroppedNavigation() {
@@ -2469,14 +2477,16 @@ static String CreateMarkupInRect(LocalFrame* frame,
   if (!start_position.GetDocument() || !end_position.GetDocument())
     return String();
 
+  const CreateMarkupOptions create_markup_options =
+      CreateMarkupOptions::Builder()
+          .SetShouldAnnotateForInterchange(true)
+          .SetShouldResolveURLs(kResolveNonLocalURLs)
+          .Build();
+
   if (start_position.CompareTo(end_position) <= 0) {
-    return CreateMarkup(start_position, end_position, kAnnotateForInterchange,
-                        ConvertBlocksToInlines::kNotConvert,
-                        kResolveNonLocalURLs);
+    return CreateMarkup(start_position, end_position, create_markup_options);
   }
-  return CreateMarkup(end_position, start_position, kAnnotateForInterchange,
-                      ConvertBlocksToInlines::kNotConvert,
-                      kResolveNonLocalURLs);
+  return CreateMarkup(end_position, start_position, create_markup_options);
 }
 
 void WebLocalFrameImpl::AdvanceFocusInForm(WebFocusType focus_type) {

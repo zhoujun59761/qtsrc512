@@ -61,6 +61,8 @@ defineTest(qtConfCommandline_sanitize) {
 # callbacks
 
 defineReplace(qtConfFunc_crossCompile) {
+    !isEmpty(config.input.xplatform): return(true)
+    !isEmpty(config.input.device-option): return(true)
     !isEmpty(config.input.sysroot): return(true)
     spec = $$[QMAKE_SPEC]
     !equals(spec, $$[QMAKE_XSPEC]): return(true)
@@ -72,7 +74,7 @@ defineReplace(qtConfFunc_licenseCheck) {
         hasOpenSource = true
     else: \
         hasOpenSource = false
-    exists($$QT_SOURCE_TREE/LICENSE.QT-LICENSE-AGREEMENT-4.0): \
+    exists($$QT_SOURCE_TREE/LICENSE.QT-LICENSE-AGREEMENT): \
         hasCommercial = true
     else: \
         hasCommercial = false
@@ -202,7 +204,7 @@ defineReplace(qtConfFunc_licenseCheck) {
             affix = either
         }
     } else {
-        theLicense = $$cat($$QT_SOURCE_TREE/LICENSE.QT-LICENSE-AGREEMENT-4.0, lines)
+        theLicense = $$cat($$QT_SOURCE_TREE/LICENSE.QT-LICENSE-AGREEMENT, lines)
         theLicense = $$first(theLicense)
         showWhat = "Type '?' to view the $${theLicense}."
     }
@@ -229,7 +231,7 @@ defineReplace(qtConfFunc_licenseCheck) {
             } else: equals(val, n)|equals(val, no) {
                 return(false)
             } else: equals(commercial, yes):equals(val, ?) {
-                licenseFile = $$QT_SOURCE_TREE/LICENSE.QT-LICENSE-AGREEMENT-4.0
+                licenseFile = $$QT_SOURCE_TREE/LICENSE.QT-LICENSE-AGREEMENT
             } else: equals(commercial, no):equals(val, l) {
                 licenseFile = $$QT_SOURCE_TREE/LICENSE.LGPL3
             } else: equals(commercial, no):equals(val, g):$$gpl2Ok {

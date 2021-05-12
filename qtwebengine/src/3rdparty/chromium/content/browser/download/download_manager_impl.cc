@@ -58,6 +58,7 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/download_item_utils.h"
 #include "content/public/browser/download_manager_delegate.h"
+#include "content/public/browser/download_request_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_frame_host.h"
@@ -100,18 +101,6 @@ StoragePartitionImpl* GetStoragePartition(BrowserContext* context,
   }
   return static_cast<StoragePartitionImpl*>(
       BrowserContext::GetStoragePartition(context, site_instance));
-}
-
-bool CanRequestURLFromRenderer(int render_process_id, GURL url) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  // Check if the renderer is permitted to request the requested URL.
-  if (!ChildProcessSecurityPolicyImpl::GetInstance()->CanRequestURL(
-          render_process_id, url)) {
-    DVLOG(1) << "Denied unauthorized download request for "
-             << url.possibly_invalid_spec();
-    return false;
-  }
-  return true;
 }
 
 void OnDownloadStarted(
@@ -311,7 +300,8 @@ DownloadManagerImpl::DownloadManagerImpl(BrowserContext* browser_context)
         std::make_unique<download::InProgressDownloadManager>(
             this,
             IsOffTheRecord() ? base::FilePath() : browser_context_->GetPath(),
-            base::BindRepeating(&IsOriginSecure));
+            base::BindRepeating(&IsOriginSecure),
+            base::BindRepeating(&DownloadRequestUtils::IsURLSafe));
   } else {
     in_progress_manager_->set_delegate(this);
     in_progress_manager_->set_download_start_observer(nullptr);
@@ -1209,7 +1199,7 @@ void DownloadManagerImpl::BeginDownloadInternal(
     const GURL& site_url) {
   // Check if the renderer is permitted to request the requested URL.
   if (params->render_process_host_id() >= 0 &&
-      !CanRequestURLFromRenderer(params->render_process_host_id(),
+      !DownloadRequestUtils::IsURLSafe(params->render_process_host_id(),
                                  params->url())) {
     CreateInterruptedDownload(
         std::move(params),

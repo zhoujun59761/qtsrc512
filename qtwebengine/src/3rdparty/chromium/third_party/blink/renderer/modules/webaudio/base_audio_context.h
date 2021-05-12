@@ -95,6 +95,7 @@ class MODULES_EXPORT BaseAudioContext
       public PausableObject {
   USING_GARBAGE_COLLECTED_MIXIN(BaseAudioContext);
   DEFINE_WRAPPERTYPEINFO();
+  USING_PRE_FINALIZER(BaseAudioContext, Dispose);
 
  public:
   // The state of an audio context.  On creation, the state is Suspended. The
@@ -112,6 +113,8 @@ class MODULES_EXPORT BaseAudioContext
   ~BaseAudioContext() override;
 
   void Trace(blink::Visitor*) override;
+
+  void Dispose();
 
   // Is the destination node initialized and ready to handle audio?
   bool IsDestinationInitialized() const {
@@ -142,6 +145,8 @@ class MODULES_EXPORT BaseAudioContext
                             size_t number_of_frames,
                             float sample_rate,
                             ExceptionState&);
+
+  virtual bool IsPullingAudioGraph() const = 0;
 
   // Asynchronous audio file data decoding.
   ScriptPromise decodeAudioData(ScriptState*,
@@ -276,7 +281,7 @@ class MODULES_EXPORT BaseAudioContext
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(statechange);
 
-  void StartRendering();
+  virtual void StartRendering();
 
   void NotifyStateChange();
 
@@ -308,6 +313,8 @@ class MODULES_EXPORT BaseAudioContext
   // worklet rendering thread. Must be called from the rendering thread.
   // Does nothing when the worklet global scope does not exist.
   void UpdateWorkletGlobalScopeOnRenderingThread();
+
+  Mutex& GetTearDownMutex() const { return tear_down_mutex_; }
 
  protected:
   enum ContextType { kRealtimeContext, kOfflineContext };
@@ -445,6 +452,12 @@ class MODULES_EXPORT BaseAudioContext
   // This cannot be nullptr once it is assigned from AudioWorkletThread until
   // the BaseAudioContext goes away.
   WorkerThread* audio_worklet_thread_ = nullptr;
+
+  // Due to the multi-threading architecture of WebAudio, it is possible that
+  // object allocated by the main thread still can be accessed by the audio
+  // rendering thread while this context is torn down (GCed) by
+  // |Uninitialize()|.
+  mutable Mutex tear_down_mutex_;
 };
 
 }  // namespace blink

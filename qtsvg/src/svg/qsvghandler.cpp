@@ -104,7 +104,7 @@ static inline QByteArray msgCouldNotResolveProperty(const QString &id, const QXm
 
 // ======== duplicated from qcolor_p
 
-static inline int qsvg_h2i(char hex)
+static inline int qsvg_h2i(char hex, bool *ok = nullptr)
 {
     if (hex >= '0' && hex <= '9')
         return hex - '0';
@@ -112,18 +112,20 @@ static inline int qsvg_h2i(char hex)
         return hex - 'a' + 10;
     if (hex >= 'A' && hex <= 'F')
         return hex - 'A' + 10;
+    if (ok)
+        *ok = false;
     return -1;
 }
 
-static inline int qsvg_hex2int(const char *s)
+static inline int qsvg_hex2int(const char *s, bool *ok = nullptr)
 {
-    return (qsvg_h2i(s[0]) << 4) | qsvg_h2i(s[1]);
+    return (qsvg_h2i(s[0], ok) * 16) | qsvg_h2i(s[1], ok);
 }
 
-static inline int qsvg_hex2int(char s)
+static inline int qsvg_hex2int(char s, bool *ok = nullptr)
 {
-    int h = qsvg_h2i(s);
-    return (h << 4) | h;
+    int h = qsvg_h2i(s, ok);
+    return (h * 16) | h;
 }
 
 bool qsvg_get_hex_rgb(const char *name, QRgb *rgb)
@@ -133,26 +135,27 @@ bool qsvg_get_hex_rgb(const char *name, QRgb *rgb)
     name++;
     int len = qstrlen(name);
     int r, g, b;
+    bool ok = true;
     if (len == 12) {
-        r = qsvg_hex2int(name);
-        g = qsvg_hex2int(name + 4);
-        b = qsvg_hex2int(name + 8);
+        r = qsvg_hex2int(name, &ok);
+        g = qsvg_hex2int(name + 4, &ok);
+        b = qsvg_hex2int(name + 8, &ok);
     } else if (len == 9) {
-        r = qsvg_hex2int(name);
-        g = qsvg_hex2int(name + 3);
-        b = qsvg_hex2int(name + 6);
+        r = qsvg_hex2int(name, &ok);
+        g = qsvg_hex2int(name + 3, &ok);
+        b = qsvg_hex2int(name + 6, &ok);
     } else if (len == 6) {
-        r = qsvg_hex2int(name);
-        g = qsvg_hex2int(name + 2);
-        b = qsvg_hex2int(name + 4);
+        r = qsvg_hex2int(name, &ok);
+        g = qsvg_hex2int(name + 2, &ok);
+        b = qsvg_hex2int(name + 4, &ok);
     } else if (len == 3) {
-        r = qsvg_hex2int(name[0]);
-        g = qsvg_hex2int(name[1]);
-        b = qsvg_hex2int(name[2]);
+        r = qsvg_hex2int(name[0], &ok);
+        g = qsvg_hex2int(name[1], &ok);
+        b = qsvg_hex2int(name[2], &ok);
     } else {
         r = g = b = -1;
     }
-    if ((uint)r > 255 || (uint)g > 255 || (uint)b > 255) {
+    if ((uint)r > 255 || (uint)g > 255 || (uint)b > 255 || !ok) {
         *rgb = 0;
         return false;
     }
@@ -1526,13 +1529,19 @@ static void pathArc(QPainterPath &path,
                     qreal               y,
                     qreal curx, qreal cury)
 {
+    const qreal Pr1 = rx * rx;
+    const qreal Pr2 = ry * ry;
+
+    if (!Pr1 || !Pr2)
+        return;
+
     qreal sin_th, cos_th;
     qreal a00, a01, a10, a11;
     qreal x0, y0, x1, y1, xc, yc;
     qreal d, sfactor, sfactor_sq;
     qreal th0, th1, th_arc;
     int i, n_segs;
-    qreal dx, dy, dx1, dy1, Pr1, Pr2, Px, Py, check;
+    qreal dx, dy, dx1, dy1, Px, Py, check;
 
     rx = qAbs(rx);
     ry = qAbs(ry);
@@ -1544,8 +1553,6 @@ static void pathArc(QPainterPath &path,
     dy = (cury - y) / 2.0;
     dx1 =  cos_th * dx + sin_th * dy;
     dy1 = -sin_th * dx + cos_th * dy;
-    Pr1 = rx * rx;
-    Pr2 = ry * ry;
     Px = dx1 * dx1;
     Py = dy1 * dy1;
     /* Spec : check if radii are large enough */
@@ -1569,6 +1576,8 @@ static void pathArc(QPainterPath &path,
        The arc fits a unit-radius circle in this space.
     */
     d = (x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0);
+    if (!d)
+        return;
     sfactor_sq = 1.0 / d - 0.25;
     if (sfactor_sq < 0) sfactor_sq = 0;
     sfactor = qSqrt(sfactor_sq);
@@ -3058,17 +3067,27 @@ static QSvgNode *createRectNode(QSvgNode *parent,
     const QStringRef rx      = attributes.value(QLatin1String("rx"));
     const QStringRef ry      = attributes.value(QLatin1String("ry"));
 
+    bool ok = true;
     QSvgHandler::LengthType type;
-    qreal nwidth = parseLength(width, type, handler);
+    qreal nwidth = parseLength(width, type, handler, &ok);
+    if (!ok)
+        return nullptr;
     nwidth = convertToPixels(nwidth, true, type);
-
-    qreal nheight = parseLength(height, type, handler);
+    qreal nheight = parseLength(height, type, handler, &ok);
+    if (!ok)
+        return nullptr;
     nheight = convertToPixels(nheight, true, type);
     qreal nrx = toDouble(rx);
     qreal nry = toDouble(ry);
 
-    QRectF bounds(toDouble(x), toDouble(y),
-                  nwidth, nheight);
+    QRectF bounds(toDouble(x), toDouble(y), nwidth, nheight);
+    if (bounds.isEmpty())
+        return nullptr;
+
+    if (!rx.isEmpty() && ry.isEmpty())
+        nry = nrx;
+    else if (!ry.isEmpty() && rx.isEmpty())
+        nrx = nry;
 
     //9.2 The 'rect'  element clearly specifies it
     // but the case might in fact be handled because
@@ -3077,11 +3096,6 @@ static QSvgNode *createRectNode(QSvgNode *parent,
         nrx = bounds.width()/2;
     if (nry > bounds.height()/2)
         nry = bounds.height()/2;
-
-    if (!rx.isEmpty() && ry.isEmpty())
-        nry = nrx;
-    else if (!ry.isEmpty() && rx.isEmpty())
-        nrx = nry;
 
     //we draw rounded rect from 0...99
     //svg from 0...bounds.width()/2 so we're adjusting the
@@ -3625,6 +3639,10 @@ void QSvgHandler::init()
     parse();
 }
 
+// Having too many unfinished elements will cause a stack overflow
+// in the dtor of QSvgTinyDocument, see oss-fuzz issue 24000.
+static const int unfinishedElementsLimit = 2048;
+
 void QSvgHandler::parse()
 {
     xml->setNamespaceProcessing(false);
@@ -3633,6 +3651,7 @@ void QSvgHandler::parse()
     m_inStyle = false;
 #endif
     bool done = false;
+    int remainingUnfinishedElements = unfinishedElementsLimit;
     while (!xml->atEnd() && !done) {
         switch (xml->readNext()) {
         case QXmlStreamReader::StartElement:
@@ -3644,7 +3663,10 @@ void QSvgHandler::parse()
             // namespaceUri is empty. The only possible strategy at
             // this point is to do what everyone else seems to do and
             // ignore the reported namespaceUri completely.
-            if (!startElement(xml->name().toString(), xml->attributes())) {
+            if (remainingUnfinishedElements
+                    && startElement(xml->name().toString(), xml->attributes())) {
+                --remainingUnfinishedElements;
+            } else {
                 delete m_doc;
                 m_doc = 0;
                 return;
@@ -3652,6 +3674,7 @@ void QSvgHandler::parse()
             break;
         case QXmlStreamReader::EndElement:
             endElement(xml->name());
+            ++remainingUnfinishedElements;
             // if we are using somebody else's qxmlstreamreader
             // we should not read until the end of the stream
             done = !m_ownsReader && (xml->name() == QLatin1String("svg"));
@@ -3852,16 +3875,17 @@ bool QSvgHandler::endElement(const QStringRef &localName)
     return true;
 }
 
-void QSvgHandler::resolveGradients(QSvgNode *node)
+void QSvgHandler::resolveGradients(QSvgNode *node, int nestedDepth)
 {
     if (!node || (node->type() != QSvgNode::DOC && node->type() != QSvgNode::G
         && node->type() != QSvgNode::DEFS && node->type() != QSvgNode::SWITCH)) {
         return;
     }
+
     QSvgStructureNode *structureNode = static_cast<QSvgStructureNode *>(node);
 
-    QList<QSvgNode *> ren = structureNode->renderers();
-    for (QList<QSvgNode *>::iterator it = ren.begin(); it != ren.end(); ++it) {
+    const QList<QSvgNode *> ren = structureNode->renderers();
+    for (auto it = ren.begin(); it != ren.end(); ++it) {
         QSvgFillStyle *fill = static_cast<QSvgFillStyle *>((*it)->styleProperty(QSvgStyleProperty::FILL));
         if (fill && !fill->isGradientResolved()) {
             QString id = fill->gradientId();
@@ -3886,7 +3910,8 @@ void QSvgHandler::resolveGradients(QSvgNode *node)
             }
         }
 
-        resolveGradients(*it);
+        if (nestedDepth < 2048)
+            resolveGradients(*it, nestedDepth + 1);
     }
 }
 

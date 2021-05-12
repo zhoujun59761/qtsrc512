@@ -140,7 +140,7 @@ Qt::KeyboardModifiers QGuiApplicationPrivate::modifier_buttons = Qt::NoModifier;
 
 QPointF QGuiApplicationPrivate::lastCursorPosition(qInf(), qInf());
 
-QWindow *QGuiApplicationPrivate::currentMouseWindow = 0;
+QPointer<QWindow> QGuiApplicationPrivate::currentMouseWindow;
 
 QString QGuiApplicationPrivate::styleOverride;
 
@@ -185,7 +185,7 @@ int QGuiApplicationPrivate::mousePressY = 0;
 static int mouseDoubleClickDistance = -1;
 static int touchDoubleTapDistance = -1;
 
-QWindow *QGuiApplicationPrivate::currentMousePressWindow = 0;
+QPointer<QWindow> QGuiApplicationPrivate::currentMousePressWindow;
 
 static Qt::LayoutDirection layout_direction = Qt::LayoutDirectionAuto;
 static bool force_reverse = false;
@@ -201,7 +201,7 @@ QClipboard *QGuiApplicationPrivate::qt_clipboard = 0;
 QList<QScreen *> QGuiApplicationPrivate::screen_list;
 
 QWindowList QGuiApplicationPrivate::window_list;
-QWindow *QGuiApplicationPrivate::focus_window = 0;
+QPointer<QWindow> QGuiApplicationPrivate::focus_window;
 
 static QBasicMutex applicationFontMutex;
 QFont *QGuiApplicationPrivate::app_font = 0;
@@ -1784,6 +1784,60 @@ int QGuiApplication::exec()
     return QCoreApplication::exec();
 }
 
+void QGuiApplicationPrivate::captureGlobalModifierState(QEvent *e)
+{
+    if (e->spontaneous()) {
+        // Capture the current mouse and keyboard states. Doing so here is
+        // required in order to support Qt Test synthesized events. Real mouse
+        // and keyboard state updates from the platform plugin are managed by
+        // QGuiApplicationPrivate::process(Mouse|Wheel|Key|Touch|Tablet)Event();
+        // ### FIXME: Qt Test should not call qapp->notify(), but rather route
+        // the events through the proper QPA interface. This is required to
+        // properly generate all other events such as enter/leave etc.
+        switch (e->type()) {
+        case QEvent::MouseButtonPress: {
+            QMouseEvent *me = static_cast<QMouseEvent *>(e);
+            QGuiApplicationPrivate::modifier_buttons = me->modifiers();
+            QGuiApplicationPrivate::mouse_buttons |= me->button();
+            break;
+        }
+        case QEvent::MouseButtonDblClick: {
+            QMouseEvent *me = static_cast<QMouseEvent *>(e);
+            QGuiApplicationPrivate::modifier_buttons = me->modifiers();
+            QGuiApplicationPrivate::mouse_buttons |= me->button();
+            break;
+        }
+        case QEvent::MouseButtonRelease: {
+            QMouseEvent *me = static_cast<QMouseEvent *>(e);
+            QGuiApplicationPrivate::modifier_buttons = me->modifiers();
+            QGuiApplicationPrivate::mouse_buttons &= ~me->button();
+            break;
+        }
+        case QEvent::KeyPress:
+        case QEvent::KeyRelease:
+        case QEvent::MouseMove:
+#if QT_CONFIG(wheelevent)
+        case QEvent::Wheel:
+#endif
+        case QEvent::TouchBegin:
+        case QEvent::TouchUpdate:
+        case QEvent::TouchEnd:
+#if QT_CONFIG(tabletevent)
+        case QEvent::TabletMove:
+        case QEvent::TabletPress:
+        case QEvent::TabletRelease:
+#endif
+        {
+            QInputEvent *ie = static_cast<QInputEvent *>(e);
+            QGuiApplicationPrivate::modifier_buttons = ie->modifiers();
+            break;
+        }
+        default:
+            break;
+        }
+    }
+}
+
 /*! \reimp
 */
 bool QGuiApplication::notify(QObject *object, QEvent *event)
@@ -1792,6 +1846,8 @@ bool QGuiApplication::notify(QObject *object, QEvent *event)
         if (QGuiApplicationPrivate::sendQWindowEventToQPlatformWindow(static_cast<QWindow *>(object), event))
             return true; // Platform plugin ate the event
     }
+
+    QGuiApplicationPrivate::captureGlobalModifierState(event);
 
     return QCoreApplication::notify(object, event);
 }

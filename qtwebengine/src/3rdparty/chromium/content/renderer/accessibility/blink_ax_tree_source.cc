@@ -28,6 +28,7 @@
 #include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/public/web/web_ax_enums.h"
 #include "third_party/blink/public/web/web_ax_object.h"
+#include "third_party/blink/public/web/web_disallow_transition_scope.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_element.h"
 #include "third_party/blink/public/web/web_form_control_element.h"
@@ -436,6 +437,13 @@ WebAXObject BlinkAXTreeSource::GetNull() const {
 
 void BlinkAXTreeSource::SerializeNode(WebAXObject src,
                                       AXContentNodeData* dst) const {
+#if DCHECK_IS_ON()
+  // Never causes a document lifecycle change during serialization,
+  // because the assumption is that layout is in a safe, stable state.
+  WebDocument document = GetMainDocument();
+  blink::WebDisallowTransitionScope disallow(&document);
+#endif
+
   dst->role = AXRoleFromBlink(src.Role());
   AXStateFromBlink(src, dst);
   dst->id = src.AxID();
@@ -660,9 +668,10 @@ void BlinkAXTreeSource::SerializeNode(WebAXObject src,
       dst->SetDefaultActionVerb(AXDefaultActionVerbFromBlink(src.Action()));
     }
 
-    if (src.HasComputedStyle()) {
+    blink::WebString display_style = src.ComputedStyleDisplay();
+    if (!display_style.IsEmpty()) {
       TruncateAndAddStringAttribute(dst, ax::mojom::StringAttribute::kDisplay,
-                                    src.ComputedStyleDisplay().Utf8());
+                                    display_style.Utf8());
     }
 
     if (src.Language().length()) {

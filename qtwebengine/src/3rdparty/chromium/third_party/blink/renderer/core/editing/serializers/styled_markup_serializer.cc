@@ -45,6 +45,7 @@
 #include "third_party/blink/renderer/core/editing/visible_units.h"
 #include "third_party/blink/renderer/core/html/html_body_element.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
+#include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -96,11 +97,13 @@ class StyledMarkupTraverser {
  private:
   bool ShouldAnnotate() const;
   bool ShouldConvertBlocksToInlines() const;
+  bool IsForMarkupSanitization() const;
   void AppendStartMarkup(Node&);
   void AppendEndMarkup(Node&);
   EditingStyle* CreateInlineStyle(Element&);
   bool NeedsInlineStyle(const Element&);
   bool ShouldApplyWrappingStyle(const Node&) const;
+  bool ShouldSerializeUnrenderedElement(const Node&) const;
 
   StyledMarkupAccumulator* accumulator_;
   Member<Node> last_closed_;
@@ -114,24 +117,25 @@ bool StyledMarkupTraverser<Strategy>::ShouldAnnotate() const {
 }
 
 template <typename Strategy>
+bool StyledMarkupTraverser<Strategy>::IsForMarkupSanitization() const {
+  return accumulator_ && accumulator_->IsForMarkupSanitization();
+}
+
+template <typename Strategy>
 bool StyledMarkupTraverser<Strategy>::ShouldConvertBlocksToInlines() const {
   return accumulator_->ShouldConvertBlocksToInlines();
 }
 
 template <typename Strategy>
 StyledMarkupSerializer<Strategy>::StyledMarkupSerializer(
-    EAbsoluteURLs should_resolve_urls,
-    EAnnotateForInterchange should_annotate,
     const PositionTemplate<Strategy>& start,
     const PositionTemplate<Strategy>& end,
     Node* highest_node_to_be_serialized,
-    ConvertBlocksToInlines convert_blocks_to_inlines)
+    const CreateMarkupOptions& options)
     : start_(start),
       end_(end),
-      should_resolve_urls_(should_resolve_urls),
-      should_annotate_(should_annotate),
       highest_node_to_be_serialized_(highest_node_to_be_serialized),
-      convert_blocks_to_inlines_(convert_blocks_to_inlines),
+      options_(options),
       last_closed_(highest_node_to_be_serialized) {}
 
 template <typename Strategy>
@@ -179,9 +183,9 @@ static EditingStyle* StyleFromMatchedRulesAndInlineDecl(
 template <typename Strategy>
 String StyledMarkupSerializer<Strategy>::CreateMarkup() {
   StyledMarkupAccumulator markup_accumulator(
-      should_resolve_urls_, ToTextOffset(start_.ParentAnchoredEquivalent()),
+      ToTextOffset(start_.ParentAnchoredEquivalent()),
       ToTextOffset(end_.ParentAnchoredEquivalent()), start_.GetDocument(),
-      should_annotate_, convert_blocks_to_inlines_);
+      options_);
 
   Node* past_end = end_.NodeAsRangePastLastNode();
 
@@ -358,10 +362,7 @@ Node* StyledMarkupTraverser<Strategy>::Traverse(Node* start_node,
         continue;
       }
 
-      if (!n->GetLayoutObject() &&
-          (!n->IsElementNode() || !ToElement(n)->HasDisplayContentsStyle()) &&
-          !EnclosingElementWithTag(FirstPositionInOrBeforeNode(*n),
-                                   selectTag)) {
+      if (!n->GetLayoutObject() && !ShouldSerializeUnrenderedElement(*n)) {
         next = Strategy::NextSkippingChildren(*n);
         // Don't skip over pastEnd.
         if (past_end && Strategy::IsDescendantOf(*past_end, *n))
@@ -496,6 +497,11 @@ void StyledMarkupTraverser<Strategy>::AppendStartMarkup(Node& node) {
         inline_style->ForceInline();
         // FIXME: Should this be included in forceInline?
         inline_style->Style()->SetProperty(CSSPropertyFloat, CSSValueNone);
+
+        if (IsForMarkupSanitization()) {
+          EditingStyleUtilities::StripUAStyleRulesForMarkupSanitization(
+              inline_style);
+        }
       }
       accumulator_->AppendTextWithInlineStyle(text, inline_style);
       break;
@@ -551,7 +557,29 @@ EditingStyle* StyledMarkupTraverser<Strategy>::CreateInlineStyle(
   if (element.IsHTMLElement() && ShouldAnnotate())
     inline_style->MergeStyleFromRulesForSerialization(&ToHTMLElement(element));
 
+  if (IsForMarkupSanitization())
+    EditingStyleUtilities::StripUAStyleRulesForMarkupSanitization(inline_style);
+
   return inline_style;
+}
+
+template <typename Strategy>
+bool StyledMarkupTraverser<Strategy>::ShouldSerializeUnrenderedElement(
+    const Node& node) const {
+  DCHECK(!node.GetLayoutObject());
+  if (node.IsElementNode() && ToElement(node).HasDisplayContentsStyle())
+    return true;
+  if (EnclosingElementWithTag(FirstPositionInOrBeforeNode(node),
+                              HTMLNames::selectTag)) {
+    return true;
+  }
+  if (IsForMarkupSanitization()) {
+    // During sanitization, iframes in the staging document haven't loaded and
+    // are hence not rendered. They should still be serialized.
+    if (IsHTMLIFrameElement(node))
+      return true;
+  }
+  return false;
 }
 
 template class StyledMarkupSerializer<EditingStrategy>;

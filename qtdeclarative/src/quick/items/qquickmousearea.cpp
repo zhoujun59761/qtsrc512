@@ -938,6 +938,12 @@ void QQuickMouseArea::mouseUngrabEvent()
     ungrabMouse();
 }
 
+void QQuickMouseArea::touchUngrabEvent()
+{
+    // allow a Pointer Handler to steal the grab from MouseArea
+    ungrabMouse();
+}
+
 bool QQuickMouseArea::sendMouseEvent(QMouseEvent *event)
 {
     Q_D(QQuickMouseArea);
@@ -1072,6 +1078,12 @@ void QQuickMouseArea::itemChange(ItemChange change, const ItemChangeData &value)
                 d->lastPos = mapFromScene(d->lastScenePos);
             }
             setHovered(!d->hovered);
+        }
+        if (d->pressed && (!isVisible())) {
+            // This happens when the mouse area sets itself disabled or hidden
+            // inside the press handler. In that case we should not keep the internal
+            // state as pressed, since we never became the mouse grabber.
+            ungrabMouse();
         }
         break;
     default:

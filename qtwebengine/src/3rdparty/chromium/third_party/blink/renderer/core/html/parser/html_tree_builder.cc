@@ -782,7 +782,7 @@ void HTMLTreeBuilder::ProcessStartTagForInBody(AtomicHTMLToken* token) {
     ProcessGenericRawTextStartTag(token);
     return;
   }
-  if (token->GetName() == noscriptTag && options_.script_enabled) {
+  if (token->GetName() == noscriptTag && options_.scripting_flag) {
     ProcessGenericRawTextStartTag(token);
     return;
   }
@@ -2525,7 +2525,7 @@ bool HTMLTreeBuilder::ProcessStartTagForInHead(AtomicHTMLToken* token) {
     return true;
   }
   if (token->GetName() == noscriptTag) {
-    if (options_.script_enabled) {
+    if (options_.scripting_flag) {
       ProcessGenericRawTextStartTag(token);
       return true;
     }
@@ -2689,6 +2689,12 @@ void HTMLTreeBuilder::ProcessTokenInForeignContent(AtomicHTMLToken* token) {
         if (ScriptingContentIsAllowed(tree_.GetParserContentPolicy()))
           script_to_process_ = tree_.CurrentElement();
         tree_.OpenElements()->Pop();
+        return;
+      }
+      if (token->GetName() == brTag || token->GetName() == pTag) {
+        ParseError(token);
+        tree_.OpenElements()->PopUntilForeignContentScopeMarker();
+        ProcessEndTag(token);
         return;
       }
       if (!tree_.CurrentStackItem()->IsInHTMLNamespace()) {

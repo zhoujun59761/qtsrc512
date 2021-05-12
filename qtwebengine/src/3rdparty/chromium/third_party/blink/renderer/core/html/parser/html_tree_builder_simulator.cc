@@ -169,7 +169,7 @@ HTMLTreeBuilderSimulator::SimulatedToken HTMLTreeBuilderSimulator::Simulate(
                     options_.plugins_enabled) ||
                    ThreadSafeMatch(tag_name, noframesTag) ||
                    (ThreadSafeMatch(tag_name, noscriptTag) &&
-                    options_.script_enabled)) {
+                    options_.scripting_flag)) {
           tokenizer->SetState(HTMLTokenizer::kRAWTEXTState);
         }
       }
@@ -185,6 +185,14 @@ HTMLTreeBuilderSimulator::SimulatedToken HTMLTreeBuilderSimulator::Simulate(
       } else if (in_select_insertion_mode_ && TokenExitsInSelect(token)) {
         in_select_insertion_mode_ = false;
       }
+    }
+  }
+
+  if (token.GetType() == HTMLToken::kEndTag && InForeignContent()) {
+    const String& tag_name = token.Data();
+    if (ThreadSafeMatch(tag_name, pTag) ||
+        ThreadSafeMatch(tag_name, brTag)) {
+      namespace_stack_.pop_back();
     }
   }
 

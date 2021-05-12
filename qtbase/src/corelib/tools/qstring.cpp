@@ -560,31 +560,12 @@ bool QtPrivate::isLatin1(QStringView s) Q_DECL_NOTHROW
     const QChar *ptr = s.begin();
     const QChar *end = s.end();
 
-#if defined(__SSE4_1__)
+#ifdef __SSE2__
     const char *ptr8 = reinterpret_cast<const char *>(ptr);
     const char *end8 = reinterpret_cast<const char *>(end);
     if (!simdTestMask(ptr8, end8, 0xff00ff00))
         return false;
     ptr = reinterpret_cast<const QChar *>(ptr8);
-#elif defined(__SSE2__)
-    // Testing if every other byte is non-zero can be done efficiently by
-    // using PUNPCKHBW (unpack high order bytes) and comparing that to zero.
-    while (ptr + 32 < end) {
-        __m128i data1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(ptr));
-        __m128i data2 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(ptr + 16));
-        __m128i high = _mm_unpackhi_epi8(data1, data2);
-        __m128i comparison = _mm_cmpeq_epi16(high, _mm_setzero_si128());
-        if (_mm_movemask_epi8(comparison))
-            return false;
-        ptr += 16;
-    }
-    if (ptr + 16 < end) {
-        __m128i data1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(ptr));
-        __m128i high = _mm_unpackhi_epi8(data1, data1);
-        __m128i comparison = _mm_cmpeq_epi16(high, _mm_setzero_si128());
-        if (_mm_movemask_epi8(comparison))
-            return false;
-    }
 #endif
 
     while (ptr != end) {
@@ -918,7 +899,7 @@ static int ucstrncmp(const QChar *a, const QChar *b, size_t l)
     };
 
     // we're going to read a[0..15] and b[0..15] (32 bytes)
-    for ( ; a + offset + 16 <= end; offset += 16) {
+    for ( ; end - a >= offset + 16; offset += 16) {
 #ifdef __AVX2__
         __m256i a_data = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a + offset));
         __m256i b_data = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b + offset));
@@ -942,7 +923,7 @@ static int ucstrncmp(const QChar *a, const QChar *b, size_t l)
     }
 
     // we're going to read a[0..7] and b[0..7] (16 bytes)
-    if (a + offset + 8 <= end) {
+    if (end - a >= offset + 8) {
         __m128i a_data = _mm_loadu_si128(reinterpret_cast<const __m128i *>(a + offset));
         __m128i b_data = _mm_loadu_si128(reinterpret_cast<const __m128i *>(b + offset));
         if (isDifferent(a_data, b_data))
@@ -952,7 +933,7 @@ static int ucstrncmp(const QChar *a, const QChar *b, size_t l)
     }
 
     // we're going to read a[0..3] and b[0..3] (8 bytes)
-    if (a + offset + 4 <= end) {
+    if (end - a >= offset + 4) {
         __m128i a_data = _mm_loadl_epi64(reinterpret_cast<const __m128i *>(a + offset));
         __m128i b_data = _mm_loadl_epi64(reinterpret_cast<const __m128i *>(b + offset));
         if (isDifferent(a_data, b_data))
@@ -973,7 +954,7 @@ static int ucstrncmp(const QChar *a, const QChar *b, size_t l)
     if (l >= 8) {
         const QChar *end = a + l;
         const uint16x8_t mask = { 1, 1 << 1, 1 << 2, 1 << 3, 1 << 4, 1 << 5, 1 << 6, 1 << 7 };
-        while (a + 7 < end) {
+        while (end - a > 7) {
             uint16x8_t da = vld1q_u16(reinterpret_cast<const uint16_t *>(a));
             uint16x8_t db = vld1q_u16(reinterpret_cast<const uint16_t *>(b));
 

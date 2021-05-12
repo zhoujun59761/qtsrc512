@@ -145,6 +145,8 @@ void BaseAudioContext::Clear() {
 void BaseAudioContext::Uninitialize() {
   DCHECK(IsMainThread());
 
+  MutexLocker locker(GetTearDownMutex());
+
   if (!IsDestinationInitialized())
     return;
 
@@ -165,6 +167,12 @@ void BaseAudioContext::Uninitialize() {
   listener_->WaitForHRTFDatabaseLoaderThreadCompletion();
 
   Clear();
+}
+
+void BaseAudioContext::Dispose() {
+  // BaseAudioContext is going away, so remove the context from the orphan
+  // handlers.
+  GetDeferredTaskHandler().ClearContextFromOrphanHandlers();
 }
 
 void BaseAudioContext::ContextDestroyed(ExecutionContext*) {
