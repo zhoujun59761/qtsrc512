@@ -352,8 +352,9 @@ QCamera::QCamera(const QByteArray& deviceName, QObject *parent):
     if (d->deviceControl) {
         //modify by huan lele because dsvideodevicecontrol use devInfo.first = output.toUtf8();
 #ifdef Q_OS_WIN
-        //const QString name = QString::fromLatin1(deviceName);
         const QString name = QString::fromUtf8(deviceName);
+#else
+        const QString name = QString::fromLatin1(deviceName);
 #endif
         //end modify
 
