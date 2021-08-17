@@ -216,6 +216,11 @@ bool QAudioDeviceInfo::isNull() const
     return d->info == 0;
 }
 
+QString QAudioDeviceInfo::deviceId() const
+{
+    return isNull() ? QString() : d->info->deviceId();
+}
+
 /*!
     Returns the human readable name of the audio device.
 

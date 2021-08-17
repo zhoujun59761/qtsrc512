@@ -144,6 +144,12 @@ bool CoreAudioDeviceInfo::isFormatSupported(const QAudioFormat &format) const
 }
 
 
+QString CoreAudioDeviceInfo::deviceId() const
+{
+    return m_device;
+}
+
+
 QString CoreAudioDeviceInfo::deviceName() const
 {
     return m_device;

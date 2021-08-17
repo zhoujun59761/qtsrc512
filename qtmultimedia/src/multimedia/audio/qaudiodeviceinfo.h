@@ -75,6 +75,7 @@ public:
 
     bool isNull() const;
 
+    QString deviceId() const;
     QString deviceName() const;
 
     bool isFormatSupported(const QAudioFormat &format) const;

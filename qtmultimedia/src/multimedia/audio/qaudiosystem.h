@@ -58,6 +58,7 @@ class Q_MULTIMEDIA_EXPORT QAbstractAudioDeviceInfo : public QObject
 public:
     virtual QAudioFormat preferredFormat() const = 0;
     virtual bool isFormatSupported(const QAudioFormat &format) const = 0;
+    virtual QString deviceId() const = 0;
     virtual QString deviceName() const = 0;
     virtual QStringList supportedCodecs() = 0;
     virtual QList<int> supportedSampleRates() = 0;

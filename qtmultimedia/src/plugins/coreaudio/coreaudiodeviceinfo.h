@@ -57,6 +57,7 @@ public:
 
     QAudioFormat preferredFormat() const;
     bool isFormatSupported(const QAudioFormat &format) const;
+    QString deviceId() const;
     QString deviceName() const;
     QStringList supportedCodecs();
     QList<int> supportedSampleRates();

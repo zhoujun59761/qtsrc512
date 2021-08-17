@@ -64,6 +64,7 @@ public:
     QAudioFormat preferredFormat() const override { qWarning()<<"using null deviceinfo, none available"; return QAudioFormat(); }
     bool isFormatSupported(const QAudioFormat& ) const override { return false; }
     QAudioFormat nearestFormat(const QAudioFormat& ) const { return QAudioFormat(); }
+    QString deviceId() const override { return QString(); }
     QString deviceName() const override { return QString(); }
     QStringList supportedCodecs() override { return QStringList(); }
     QList<int> supportedSampleRates() override  { return QList<int>(); }
